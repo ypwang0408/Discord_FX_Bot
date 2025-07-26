@@ -21,6 +21,7 @@ from features import (
     RateChartGenerator,
     NotificationSystem
 )
+from features.data_manager import get_minute_precision_timestamp
 
 # 載入環境變數
 load_dotenv()
@@ -95,7 +96,7 @@ async def rate_slash(interaction: discord.Interaction):
         rate_monitor.update_server_state(
             guild_id,
             last_rate=rate,
-            last_rate_time=datetime.now().isoformat(),
+            last_rate_time=get_minute_precision_timestamp(),
             last_was_above_threshold=rate >= threshold
         )
         
@@ -675,8 +676,18 @@ async def system_slash(interaction: discord.Interaction):
     embed.add_field(name="\u200b", value="\n", inline=False)
     
     # 多伺服器統計
-    total_servers = len(data_manager.data)
-    servers_with_channels = sum(1 for data in data_manager.data.values() if data.get('channel_id'))
+    total_servers = 0
+    servers_with_channels = 0
+    
+    for key, data in data_manager.data.items():
+        # 跳過全域匯率歷史記錄
+        if key == 'global_rate_history':
+            continue
+        # 只計算字典類型的伺服器數據
+        if isinstance(data, dict):
+            total_servers += 1
+            if data.get('channel_id'):
+                servers_with_channels += 1
     
     embed.add_field(
         name="🌐 多伺服器狀態 / Multi-Server Status",
@@ -720,7 +731,7 @@ async def check_exchange_rate():
                 rate_monitor.update_server_state(
                     guild_id, 
                     last_rate=rate,
-                    last_rate_time=datetime.now().isoformat()
+                    last_rate_time=get_minute_precision_timestamp()
                 )
                 
                 # 新增到匯率歷史
@@ -768,7 +779,7 @@ async def check_exchange_rate():
                         # 更新最後通知時間
                         rate_monitor.update_server_state(
                             guild_id,
-                            last_notification_time=datetime.now().isoformat()
+                            last_notification_time=get_minute_precision_timestamp()
                         )
                         
                         logger.info(f"發送匯率警報到伺服器 {guild_id}: {rate:.4f} < {threshold}, 原因: {notification_reason}")

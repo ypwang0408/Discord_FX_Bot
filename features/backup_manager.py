@@ -9,6 +9,7 @@ import os
 import shutil
 from datetime import datetime, timedelta
 import logging
+from .data_manager import get_minute_precision_timestamp
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +45,7 @@ class DataBackupManager:
             
             # 記錄備份信息
             backup_info = {
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": get_minute_precision_timestamp(),
                 "filename": backup_filename,
                 "date": date_str,
                 "servers_count": len(self.data_manager.data),
