@@ -28,7 +28,7 @@ case "$1" in
     test)
         echo "🧪 Testing modular architecture..."
         source venv/bin/activate
-        python -c "
+        python3 -c "
 from features import *
 print('✅ All modules imported successfully')
 print('📊 Available modules:')

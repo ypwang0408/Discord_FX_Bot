@@ -3,7 +3,7 @@
 # Discord Bot Startup Script (Modular Version using tmux)
 
 SESSION_NAME="discord-bot"
-BOT_DIR="/home/ypwang/discord"
+BOT_DIR="/home/ypwang/Discord_FX_Bot"
 
 echo "🤖 Starting E.SUN Bank JPY Exchange Rate Monitor Discord Bot (Modular Version)..."
 
@@ -106,7 +106,7 @@ tmux new-session -d -s $SESSION_NAME -c $BOT_DIR
 tmux send-keys -t $SESSION_NAME "source venv/bin/activate" Enter
 tmux send-keys -t $SESSION_NAME "echo '🎯 Virtual environment activated'" Enter
 tmux send-keys -t $SESSION_NAME "echo '🚀 Starting modular Discord bot...'" Enter
-tmux send-keys -t $SESSION_NAME "python main.py" Enter
+tmux send-keys -t $SESSION_NAME "python3 main.py" Enter
 
 echo "✅ Bot started in tmux session '$SESSION_NAME'"
 echo ""
