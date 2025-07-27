@@ -19,7 +19,8 @@ from features import (
     ExchangeRateMonitor,
     DataBackupManager,
     RateChartGenerator,
-    NotificationSystem
+    NotificationSystem,
+    SystemManager
 )
 from features.data_manager import get_minute_precision_timestamp
 
@@ -48,6 +49,14 @@ backup_manager = DataBackupManager(data_manager)
 chart_generator = RateChartGenerator(data_manager)
 notification_system = NotificationSystem(data_manager, bot)
 
+# 初始化整合的系統管理器
+try:
+    system_manager = SystemManager(data_manager)
+    logger.info("✅ 系統管理器初始化成功")
+except Exception as e:
+    logger.error(f"❌ 系統管理器初始化失敗: {e}")
+    system_manager = None
+
 # ====== Bot 事件 ======
 
 @bot.event
@@ -75,6 +84,11 @@ async def on_ready():
     if not auto_backup.is_running():
         auto_backup.start()
         print("✅ 自動備份任務已啟動")
+    
+    # 啟動系統管理任務
+    if not system_management_task.is_running():
+        system_management_task.start()
+        print("✅ 系統管理任務已啟動")
 
 # ====== Slash Commands ======
 
@@ -416,7 +430,9 @@ async def help_slash(interaction: discord.Interaction):
               "`/system` - 全面系統狀態檢查 / Comprehensive system check\n"
               "`/mention <true/false>` - 設定@everyone通知 / Set @everyone notifications\n"
               "`/backup` - 手動創建數據備份 / Manual data backup\n"
-              "`/list_backups` - 列出所有備份 / List all backups",
+              "`/list_backups` - 列出所有備份 / List all backups\n"
+              "`/health [quick]` - 系統健康檢查 / System health check\n"
+              "`/maintenance [operation]` - 系統維護管理 / System maintenance",
         inline=False
     )
     
@@ -601,109 +617,454 @@ async def sync_slash(interaction: discord.Interaction):
         await interaction.followup.send(embed=embed)
 
 @bot.tree.command(name="system", description="檢查系統運行狀態和API可用性 / Check system status and API availability")
-async def system_slash(interaction: discord.Interaction):
-    """詳細的系統狀態檢查"""
+async def system_slash(interaction: discord.Interaction, detailed: bool = False):
+    """全面的系統狀態檢查（整合版）"""
     # 檢查用戶是否為管理員
     if not interaction.user.guild_permissions.administrator:
         await interaction.response.send_message("❌ 此指令需要管理員權限 / This command requires administrator permission")
         return
     
-    await interaction.response.send_message("🔍 正在檢查系統狀態... / Checking system status...")
+    # 檢查系統管理器是否可用
+    if system_manager is None:
+        await interaction.response.send_message("❌ 系統管理器未正確初始化，請重啟機器人")
+        return
+    
+    if detailed:
+        await interaction.response.send_message("🔍 正在執行詳細系統檢查... / Performing detailed system check...")
+        try:
+            system_report = await system_manager.get_comprehensive_system_report()
+            title = "🔧 詳細系統狀態報告 / Detailed System Status Report"
+        except Exception as e:
+            logger.error(f"獲取詳細系統報告失敗: {e}")
+            import traceback
+            traceback.print_exc()
+            await interaction.followup.send(f"❌ 系統檢查失敗: {str(e)}")
+            return
+    else:
+        await interaction.response.send_message("⚡ 正在執行快速系統檢查... / Performing quick system check...")
+        try:
+            system_report = await system_manager.get_quick_system_status()
+            title = "⚡ 快速系統狀態 / Quick System Status"
+        except Exception as e:
+            logger.error(f"獲取快速系統狀態失敗: {e}")
+            import traceback
+            traceback.print_exc()
+            await interaction.followup.send(f"❌ 系統檢查失敗: {str(e)}")
+            return
+    
+    # 檢查報告是否有效
+    if system_report is None or not isinstance(system_report, dict):
+        logger.error(f"系統報告無效: type={type(system_report)}, value={system_report}")
+        await interaction.followup.send("❌ 系統報告生成失敗，請稍後重試")
+        return
+    
+    # 根據系統狀態設定顏色
+    status_colors = {
+        'healthy': 0x00ff00,
+        'warning': 0xff9900,
+        'error': 0xff0000,
+        'unknown': 0x888888
+    }
+    
+    # 安全地獲取狀態
+    overall_status = 'unknown'
+    if 'overall_status' in system_report:
+        overall_status = system_report['overall_status']
+    elif 'status' in system_report:
+        overall_status = system_report['status']
     
     embed = discord.Embed(
-        title="🔧 系統狀態報告 / System Status Report",
-        color=0x0099ff,
+        title=title,
+        color=status_colors.get(overall_status, 0x888888),
         timestamp=datetime.now()
     )
     
+    # 整體狀態
+    status_emoji = {
+        'healthy': '✅',
+        'warning': '⚠️', 
+        'error': '❌',
+        'unknown': '❓'
+    }
+    
+    embed.add_field(
+        name="🎯 整體狀態 / Overall Status",
+        value=f"{status_emoji.get(overall_status, '❓')} **{overall_status.upper()}**",
+        inline=False
+    )
+    
+    if detailed:
+        # 詳細報告模式
+        quick_stats = system_report.get('quick_stats', {})
+        
+        # 健康檢查摘要
+        if quick_stats:
+            embed.add_field(
+                name="📊 健康檢查 / Health Checks",
+                value=f"檢查項目 / Total: {quick_stats.get('health_checks_total', 0)}\n"
+                      f"✅ 健康 / Healthy: {quick_stats.get('health_checks_healthy', 0)}\n"
+                      f"🔄 連續失敗 / Failures: {quick_stats.get('consecutive_failures', 0)}",
+                inline=False
+            )
+            
+            # 系統資源
+            memory_percent = quick_stats.get('memory_usage_percent', 0)
+            disk_percent = quick_stats.get('disk_usage_percent', 0)
+            memory_gb = quick_stats.get('memory_used_gb', 0)
+            
+            embed.add_field(
+                name="💻 系統資源 / System Resources",
+                value=f"記憶體 / Memory: {memory_percent:.1f}% ({memory_gb:.1f}GB)\n"
+                      f"磁碟 / Disk: {disk_percent:.1f}%\n"
+                      f"API狀態 / API: {quick_stats.get('api_status', 'unknown')}",
+                inline=False
+            )
+        
+        # 建議
+        recommendations = system_report.get('recommendations', [])
+        if recommendations:
+            embed.add_field(
+                name="💡 系統建議 / Recommendations",
+                value='\n'.join([f"• {rec}" for rec in recommendations[:4]]),
+                inline=False
+            )
+        
+        # 維護統計
+        maintenance_info = system_report.get('maintenance', {})
+        if maintenance_info and not maintenance_info.get('error'):
+            embed.add_field(
+                name="🔧 維護狀態 / Maintenance Status",
+                value=f"24小時活動 / 24h Activities: {maintenance_info.get('total_activities', 0)}\n"
+                      f"最新活動 / Latest: {maintenance_info.get('latest_activity', {}).get('activity_type', 'none')}",
+                inline=False
+            )
+    
+    else:
+        # 快速報告模式
+        embed.add_field(
+            name="⏱️ 運行時間 / Uptime",
+            value=f"{system_report.get('uptime_hours', 0):.1f} 小時 / hours",
+            inline=False
+        )
+        
+        embed.add_field(
+            name="💾 記憶體使用 / Memory Usage", 
+            value=f"{system_report.get('memory_usage_mb', 0):.1f} MB",
+            inline=False
+        )
+        
+        # 健康狀態指示
+        is_healthy = system_report.get('is_healthy', False)
+        health_status = "正常 / Healthy" if is_healthy else "需要注意 / Needs Attention"
+        embed.add_field(
+            name="🏥 健康狀態 / Health Status",
+            value=health_status,
+            inline=False
+        )
+        
+        # 如果有錯誤，顯示錯誤信息
+        if system_report.get('error'):
+            embed.add_field(
+                name="❌ 錯誤信息 / Error",
+                value=system_report['error'][:200] + "..." if len(system_report['error']) > 200 else system_report['error'],
+                inline=False
+            )
+    
     # 基本Bot資訊
+    embed.add_field(name="\u200b", value="\n", inline=False)
     embed.add_field(
         name="🤖 Bot資訊 / Bot Info",
-        value=f"名稱 / Name: {bot.user.name}\nID: {bot.user.id}\n連線延遲 / Latency: {round(bot.latency * 1000)}ms",
+        value=f"名稱 / Name: {bot.user.name}\n"
+              f"延遲 / Latency: {round(bot.latency * 1000)}ms\n"
+              f"監控狀態 / Monitor: {'✅ 運行中' if check_exchange_rate.is_running() else '❌ 已停止'}",
         inline=False
     )
-    
-    embed.add_field(name="\u200b", value="\n", inline=False)
-    
-    # 測試玉山銀行API
-    esun_status = "❌ 失敗 / Failed"
-    esun_rate = None
-    try:
-        esun_rate = await rate_monitor.get_esun_jpy_rate()
-        if esun_rate is not None:
-            esun_status = f"✅ 成功 / Success ({esun_rate:.4f})"
-        else:
-            esun_status = "⚠️ 無資料 / No data"
-    except Exception as e:
-        esun_status = f"❌ 錯誤 / Error: {str(e)[:50]}"
-    
-    # 測試備用API
-    backup_status = "❌ 失敗 / Failed"
-    try:
-        backup_rate = await rate_monitor.get_backup_jpy_rate()
-        if backup_rate is not None:
-            backup_status = f"✅ 成功 / Success ({backup_rate:.4f})"
-        else:
-            backup_status = "⚠️ 無資料 / No data"
-    except Exception as e:
-        backup_status = f"❌ 錯誤 / Error: {str(e)[:50]}"
-    
-    embed.add_field(
-        name="🌐 API狀態 / API Status",
-        value=f"玉山銀行 / E.SUN Bank: {esun_status}\n備用API / Backup API: {backup_status}",
-        inline=False
-    )
-    
-    embed.add_field(name="\u200b", value="\n", inline=False)
-    
-    # 監控狀態
-    monitor_status = "✅ 運行中 / Running" if check_exchange_rate.is_running() else "❌ 已停止 / Stopped"
-    next_check = "未知 / Unknown"
-    if check_exchange_rate.is_running():
-        now = datetime.now()
-        if now.minute < 30:
-            next_check = f"{now.hour:02d}:30"
-        else:
-            next_hour = (now.hour + 1) % 24
-            next_check = f"{next_hour:02d}:00"
-    
-    embed.add_field(
-        name="⏰ 監控狀態 / Monitor Status",
-        value=f"狀態 / Status: {monitor_status}\n下次檢查 / Next Check: {next_check}",
-        inline=False
-    )
-    
-    embed.add_field(name="\u200b", value="\n", inline=False)
     
     # 多伺服器統計
     total_servers = 0
     servers_with_channels = 0
     
     for key, data in data_manager.data.items():
-        # 跳過全域匯率歷史記錄
-        if key == 'global_rate_history':
+        if key == 'rate_history':
             continue
-        # 只計算字典類型的伺服器數據
         if isinstance(data, dict):
             total_servers += 1
             if data.get('channel_id'):
                 servers_with_channels += 1
     
     embed.add_field(
-        name="🌐 多伺服器狀態 / Multi-Server Status",
-        value=f"總伺服器 / Total Servers: {total_servers}\n已設定通知 / With Notifications: {servers_with_channels}",
+        name="🌐 服務狀態 / Service Status",
+        value=f"總伺服器 / Servers: {total_servers}\n"
+              f"已設定通知 / Notifications: {servers_with_channels}\n"
+              f"系統管理器 / System Manager: ✅ 已啟用",
         inline=False
     )
     
-    embed.set_footer(text="系統狀態檢查 / System Status Check")
+    # 操作提示
+    if detailed:
+        embed.add_field(name="\u200b", value="\n", inline=False)
+        embed.add_field(
+            name="🔧 快速操作 / Quick Actions",
+            value="• `/system` - 快速狀態檢查\n"
+                  "• `/maintenance daily` - 執行維護\n"
+                  "• `/health` - 健康檢查詳情",
+            inline=False
+        )
+    
+    embed.set_footer(text="整合系統管理 v1.0 / Integrated System Management v1.0")
     
     await interaction.followup.send(embed=embed)
+
+# ====== 系統管理輔助指令 ======
+
+@bot.tree.command(name="health", description="系統健康檢查 / System health check")
+async def health_slash(interaction: discord.Interaction, quick: bool = False):
+    """系統健康檢查"""
+    # 檢查用戶是否為管理員
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ 此指令需要管理員權限 / This command requires administrator permission")
+        return
+    
+    if quick:
+        await interaction.response.send_message("⚡ 執行快速健康檢查... / Performing quick health check...")
+        health_report = await system_manager.health_monitor.quick_health_check()
+        title = "⚡ 快速健康檢查 / Quick Health Check"
+        
+        embed = discord.Embed(
+            title=title,
+            color=0x00ff00 if health_report.get('status') == 'healthy' else 0xff9900,
+            timestamp=datetime.now()
+        )
+        
+        embed.add_field(
+            name="🎯 整體狀態 / Overall Status",
+            value=f"{'✅' if health_report.get('status') == 'healthy' else '⚠️'} **{health_report.get('status', 'unknown').upper()}**",
+            inline=False
+        )
+        
+        embed.add_field(
+            name="🔍 檢查項目 / Checks Performed",
+            value=f"檢查數量 / Total Checks: {len(health_report.get('checks', {}))}",
+            inline=False
+        )
+        
+        # 檢查結果摘要
+        if health_report.get('checks'):
+            check_summary = []
+            for check_name, check_result in health_report['checks'].items():
+                if isinstance(check_result, dict):
+                    status = check_result.get('status', 'unknown')
+                    status_icon = {"healthy": "✅", "warning": "⚠️", "error": "❌"}.get(status, "❓")
+                    check_summary.append(f"{status_icon} {check_name}")
+                else:
+                    check_summary.append(f"❓ {check_name}")
+            
+            embed.add_field(
+                name="📋 檢查結果 / Check Results",
+                value='\n'.join(check_summary),
+                inline=False
+            )
+        
+        embed.set_footer(text="提示：使用 /health 獲取詳細分析")
+        await interaction.followup.send(embed=embed)
+        return
+    
+    # 詳細健康分析
+    await interaction.response.send_message("🏥 正在執行詳細健康分析... / Performing detailed health analysis...")
+    
+    try:
+        # 獲取詳細的健康報告
+        health_report = await system_manager.health_monitor.comprehensive_health_check()
+        
+        embed = discord.Embed(
+            title="🏥 系統健康詳細分析 / Detailed Health Analysis",
+            color=0x00ff00 if health_report.get('overall_status') == 'healthy' else 0xff9900,
+            timestamp=datetime.now()
+        )
+        
+        # 檢查摘要
+        if 'metrics' in health_report:
+            metrics = health_report['metrics']
+            embed.add_field(
+                name="📊 檢查摘要 / Check Summary",
+                value=f"檢查項目 / Items: {metrics.get('checks_total', 0)}\n"
+                      f"✅ 健康 / Healthy: {metrics.get('checks_healthy', 0)}\n"
+                      f"⚠️ 警告 / Warning: {metrics.get('checks_warning', 0)}\n"
+                      f"❌ 錯誤 / Error: {metrics.get('checks_error', 0)}",
+                inline=True
+            )
+        
+        # API健康狀態
+        if 'checks' in health_report and 'api_health' in health_report['checks']:
+            api_info = health_report['checks']['api_health']
+            if isinstance(api_info, dict):
+                api_summary = []
+                for api_name, api_data in api_info.get('apis', {}).items():
+                    status_icon = {"healthy": "✅", "warning": "⚠️", "error": "❌"}.get(api_data.get('status'), "❓")
+                    response_time = api_data.get('response_time_ms', 0)
+                    api_summary.append(f"{status_icon} {api_name}: {response_time:.0f}ms")
+                
+                embed.add_field(
+                    name="🌐 API健康狀態 / API Health",
+                    value='\n'.join(api_summary[:4]) if api_summary else "無API檢查數據",
+                    inline=True
+                )
+        
+        # 資源使用詳情
+        if 'checks' in health_report and 'resource_health' in health_report['checks']:
+            resource_info = health_report['checks']['resource_health']
+            if isinstance(resource_info, dict) and resource_info.get('status') != 'error':
+                memory_info = resource_info.get('memory', {})
+                disk_info = resource_info.get('disk', {})
+                cpu_info = resource_info.get('cpu', {})
+                
+                embed.add_field(
+                    name="💻 系統資源 / System Resources",
+                    value=f"記憶體 / Memory: {memory_info.get('percent', 0):.1f}% ({memory_info.get('used_gb', 0):.1f}GB)\n"
+                          f"磁碟 / Disk: {disk_info.get('percent', 0):.1f}% ({disk_info.get('used_gb', 0):.1f}GB)\n"
+                          f"CPU: {cpu_info.get('percent', 0):.1f}%",
+                    inline=True
+                )
+        
+        # 警告信息
+        if health_report.get('warnings'):
+            warnings_text = '\n'.join([f"• {w}" for w in health_report['warnings'][:5]])
+            embed.add_field(
+                name="⚠️ 系統警告 / System Warnings",
+                value=warnings_text,
+                inline=False
+            )
+        
+        # 錯誤信息
+        if health_report.get('errors'):
+            errors_text = '\n'.join([f"• {e}" for e in health_report['errors'][:3]])
+            embed.add_field(
+                name="❌ 系統錯誤 / System Errors",
+                value=errors_text,
+                inline=False
+            )
+        
+        embed.set_footer(text="提示：使用 /system detailed:True 獲取整合報告")
+        
+        await interaction.followup.send(embed=embed)
+        
+    except Exception as e:
+        logger.error(f"健康分析失敗: {e}")
+        await interaction.followup.send(f"❌ 健康分析失敗: {str(e)}")
+
+@bot.tree.command(name="maintenance", description="系統維護管理 / System maintenance management")
+async def maintenance_slash(interaction: discord.Interaction, operation: str = "summary"):
+    """系統維護管理"""
+    # 檢查用戶是否為管理員
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ 此指令需要管理員權限 / This command requires administrator permission")
+        return
+    
+    valid_operations = ["summary", "daily", "emergency"]
+    if operation not in valid_operations:
+        await interaction.response.send_message(f"❌ 無效的維護操作。可用選項: {', '.join(valid_operations)} / Invalid operation. Available: {', '.join(valid_operations)}")
+        return
+    
+    if operation == "summary":
+        await interaction.response.send_message("� 獲取維護狀態... / Getting maintenance status...")
+        
+        try:
+            maintenance_summary = system_manager.auto_maintenance.get_maintenance_summary(24)
+            
+            embed = discord.Embed(
+                title="� 維護狀態摘要 / Maintenance Status Summary",
+                color=0x0099ff,
+                timestamp=datetime.now()
+            )
+            
+            embed.add_field(
+                name="� 24小時統計 / 24h Statistics",
+                value=f"維護活動 / Activities: {maintenance_summary.get('total_activities', 0)}",
+                inline=True
+            )
+            
+            if maintenance_summary.get('activity_breakdown'):
+                activity_text = []
+                for activity_type, stats in maintenance_summary['activity_breakdown'].items():
+                    completed = stats.get('completed', 0)
+                    failed = stats.get('failed', 0)
+                    activity_text.append(f"• {activity_type}: {completed} 成功, {failed} 失敗")
+                
+                embed.add_field(
+                    name="🔍 活動詳情 / Activity Details",
+                    value='\n'.join(activity_text[:5]) if activity_text else "無活動記錄",
+                    inline=False
+                )
+            
+            embed.add_field(
+                name="🔧 可用操作 / Available Actions",
+                value="• `/maintenance daily` - 執行日常維護\n"
+                      "• `/maintenance emergency` - 緊急清理\n"
+                      "• `/system detailed:True` - 完整系統報告",
+                inline=False
+            )
+            
+        except Exception as e:
+            embed = discord.Embed(
+                title="❌ 維護狀態獲取失敗",
+                description=f"錯誤: {str(e)}",
+                color=0xff0000
+            )
+        
+        await interaction.followup.send(embed=embed)
+    
+    else:
+        # 執行維護操作
+        if operation == "daily":
+            await interaction.response.send_message("🔧 執行日常維護... / Performing daily maintenance...")
+        else:  # emergency
+            await interaction.response.send_message("🚨 執行緊急清理... / Performing emergency cleanup...")
+        
+        try:
+            maintenance_report = await system_manager.perform_system_maintenance(action)
+            
+            embed = discord.Embed(
+                title=f"� {'日常維護' if action == 'daily' else '緊急清理'}報告 / {'Daily Maintenance' if action == 'daily' else 'Emergency Cleanup'} Report",
+                color=0x00ff00 if not maintenance_report.get('error') else 0xff0000,
+                timestamp=datetime.now()
+            )
+            
+            if maintenance_report.get('error'):
+                embed.add_field(
+                    name="❌ 錯誤 / Error",
+                    value=maintenance_report['error'],
+                    inline=False
+                )
+            else:
+                # 成功執行
+                completed_tasks = len(maintenance_report.get('tasks_completed', []))
+                failed_tasks = len(maintenance_report.get('tasks_failed', []))
+                
+                embed.add_field(
+                    name="� 執行結果 / Execution Results",
+                    value=f"✅ 成功任務 / Completed: {completed_tasks}\n"
+                          f"❌ 失敗任務 / Failed: {failed_tasks}",
+                    inline=True
+                )
+                
+                if operation == "emergency" and maintenance_report.get('space_freed_mb'):
+                    embed.add_field(
+                        name="� 空間釋放 / Space Freed",
+                        value=f"{maintenance_report['space_freed_mb']} MB",
+                        inline=True
+                    )
+            
+            await interaction.followup.send(embed=embed)
+            
+        except Exception as e:
+            logger.error(f"維護操作失敗: {e}")
+            await interaction.followup.send(f"❌ 維護操作失敗: {str(e)}")
 
 # ====== 定期任務 ======
 
 @tasks.loop(minutes=1)  # 每分鐘檢查一次，但只在特定時間執行
 async def check_exchange_rate():
-    """定期檢查匯率並發送通知"""
+    """定期檢查匯率並發送通知（優化版：API只調用一次）"""
     # 取得當前時間
     now = datetime.now()
     
@@ -714,17 +1075,31 @@ async def check_exchange_rate():
     # 檢查所有有設定通知頻道的伺服器
     servers_with_channels = data_manager.get_all_servers_with_channels()
     
-    for server_info in servers_with_channels:
-        guild_id = server_info['guild_id']
-        channel_id = server_info['channel_id']
-        threshold = server_info['threshold']
-        use_everyone_mention = server_info['use_everyone_mention']
-        server_data = server_info['server_data']
+    if not servers_with_channels:
+        return
+    
+    try:
+        # 🔥 優化：API只調用一次
+        rate = await rate_monitor.get_esun_jpy_rate()
         
-        try:
-            rate = await rate_monitor.get_esun_jpy_rate()
+        if rate is None:
+            logger.warning("無法獲取匯率，跳過本次檢查")
+            return
+        
+        # 📊 統一添加到匯率歷史（只需要做一次）
+        data_manager.add_rate_history("global", rate)
+        
+        logger.info(f"📈 獲取匯率成功: {rate:.4f} (將通知 {len(servers_with_channels)} 個伺服器)")
+        
+        # 🔄 處理所有伺服器的通知邏輯
+        for server_info in servers_with_channels:
+            guild_id = server_info['guild_id']
+            channel_id = server_info['channel_id']
+            threshold = server_info['threshold']
+            use_everyone_mention = server_info['use_everyone_mention']
+            server_data = server_info['server_data']
             
-            if rate is not None:
+            try:
                 current_above_threshold = rate >= threshold
                 
                 # 更新匯率狀態和時間戳記
@@ -733,9 +1108,6 @@ async def check_exchange_rate():
                     last_rate=rate,
                     last_rate_time=get_minute_precision_timestamp()
                 )
-                
-                # 新增到匯率歷史
-                data_manager.add_rate_history(guild_id, rate)
                 
                 # 判斷是否需要發送通知
                 should_notify = False
@@ -782,10 +1154,13 @@ async def check_exchange_rate():
                             last_notification_time=get_minute_precision_timestamp()
                         )
                         
-                        logger.info(f"發送匯率警報到伺服器 {guild_id}: {rate:.4f} < {threshold}, 原因: {notification_reason}")
+                        logger.info(f"✅ 發送匯率警報到伺服器 {guild_id}: {rate:.4f} < {threshold}, 原因: {notification_reason}")
                 
-        except Exception as e:
-            logger.error(f"檢查伺服器 {guild_id} 匯率時發生錯誤: {e}")
+            except Exception as e:
+                logger.error(f"❌ 處理伺服器 {guild_id} 通知時發生錯誤: {e}")
+                
+    except Exception as e:
+        logger.error(f"❌ 檢查匯率時發生全域錯誤: {e}")
 
 @tasks.loop(hours=24)  # 每24小時（每天）自動備份
 async def auto_backup():
@@ -802,6 +1177,74 @@ async def auto_backup():
             logger.error("❌ 每日自動備份失敗")
     except Exception as e:
         logger.error(f"自動備份任務異常: {e}")
+
+@tasks.loop(minutes=15)  # 每15分鐘執行一次健康檢查
+async def health_monitoring_task():
+    """定期健康監控任務 - 包含數據持久化"""
+    try:
+        # 使用系統管理器執行綜合健康檢查（自動保存到 server_data.json）
+        if system_manager:
+            comprehensive_report = await system_manager.get_comprehensive_system_report()
+            
+            # 記錄系統狀態
+            overall_status = comprehensive_report.get('overall_status', 'unknown')
+            if overall_status != 'healthy':
+                logger.warning(f"⚠️ 系統健康狀態: {overall_status}")
+                
+                # 如果狀態嚴重，執行自動維護
+                if overall_status == 'critical':
+                    logger.error(f"❌ 系統處於嚴重狀態，啟動自動維護程序")
+                    maintenance_result = await system_manager.perform_system_maintenance()
+                    
+                    if maintenance_result.get('recovery_attempted'):
+                        logger.info(f"🔄 自動恢復已啟動: {maintenance_result.get('recovery_actions', [])}")
+            else:
+                logger.info(f"✅ 系統健康狀態正常 - 已保存檢查記錄")
+        else:
+            # 備援：使用原有的健康監控器
+            health_report = await health_monitor.quick_health_check()
+            
+            if health_report['status'] != 'healthy':
+                logger.warning(f"⚠️ 系統健康狀態: {health_report['status']}")
+                
+                if health_report['status'] == 'error':
+                    detailed_report = await health_monitor.comprehensive_health_check()
+                    logger.error(f"❌ 系統健康檢查發現問題: {detailed_report.get('errors', [])}")
+            
+            # 檢查是否需要自動重啟
+            if health_monitor.consecutive_failures >= 3:
+                logger.warning(f"🔄 連續失敗 {health_monitor.consecutive_failures} 次，考慮自動重啟")
+                restart_attempted = await auto_maintenance.auto_restart_on_critical_failure()
+            if restart_attempted:
+                logger.info("🔄 已啟動自動重啟程序")
+                
+    except Exception as e:
+        logger.error(f"健康監控任務異常: {e}")
+
+@tasks.loop(hours=24)  # 每24小時執行一次運維任務（凌晨執行）
+async def daily_maintenance_task():
+    """每日自動運維任務"""
+    try:
+        # 在凌晨2點執行維護任務，避開高峰時段
+        now = datetime.now()
+        if now.hour == 2:
+            logger.info("🔧 開始執行每日自動運維任務...")
+            
+            maintenance_report = await auto_maintenance.run_daily_maintenance()
+            
+            # 記錄維護結果
+            completed_tasks = len(maintenance_report.get('tasks_completed', []))
+            failed_tasks = len(maintenance_report.get('tasks_failed', []))
+            warnings = len(maintenance_report.get('warnings', []))
+            
+            logger.info(f"✅ 每日運維完成: {completed_tasks} 成功, {failed_tasks} 失敗, {warnings} 警告")
+            
+            # 如果有失敗的任務，記錄詳細信息
+            if failed_tasks > 0:
+                logger.warning(f"⚠️ 運維任務失敗項目: {maintenance_report.get('tasks_failed', [])}")
+                
+    except Exception as e:
+        logger.error(f"每日運維任務異常: {e}")
 
 # ====== 錯誤處理 ======
 

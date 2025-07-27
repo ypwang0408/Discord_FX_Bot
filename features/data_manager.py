@@ -26,6 +26,9 @@ class ServerDataManager:
         # 初始化匯率歷史
         if 'rate_history' not in self.data:
             self.data['rate_history'] = []
+        # 初始化健康檢查歷史
+        if 'health_check_history' not in self.data:
+            self.data['health_check_history'] = {}
     
     def load_data(self):
         """載入伺服器數據"""
@@ -40,32 +43,48 @@ class ServerDataManager:
             return {}
     
     def save_data(self):
-        """儲存伺服器數據（混合格式：伺服器資料格式化，rate_history 緊湊）"""
+        """儲存伺服器數據（混合格式：伺服器資料格式化，特殊資料緊湊）"""
         try:
             # 創建一個副本來處理格式化
             data_to_save = self.data.copy()
             
-            # 如果有 rate_history，需要特殊處理
-            if 'rate_history' in data_to_save:
-                rate_history = data_to_save['rate_history']
+            # 提取特殊鍵值
+            rate_history = data_to_save.pop('rate_history', {})
+            health_check_history = data_to_save.pop('health_check_history', {})
+            
+            # 寫入文件 - 手動格式化
+            with open(self.data_file, 'w', encoding='utf-8') as f:
+                f.write('{\n')
                 
-                # 先保存沒有 rate_history 的部分
-                temp_data = {k: v for k, v in data_to_save.items() if k != 'rate_history'}
+                # 寫入伺服器資料（格式化）
+                items = list(data_to_save.items())
+                for i, (key, value) in enumerate(items):
+                    formatted_value = json.dumps(value, indent=2, ensure_ascii=False)
+                    # 將多行縮進調整
+                    formatted_value = '\n'.join('  ' + line for line in formatted_value.split('\n'))
+                    f.write(f'  "{key}": {formatted_value}')
+                    if items or health_check_history or rate_history:
+                        f.write(',')
+                    f.write('\n')
                 
-                # 寫入文件 - 手動格式化
-                with open(self.data_file, 'w', encoding='utf-8') as f:
-                    f.write('{\n')
-                    
-                    # 寫入伺服器資料（格式化）
-                    items = list(temp_data.items())
-                    for i, (key, value) in enumerate(items):
-                        formatted_value = json.dumps(value, indent=2, ensure_ascii=False)
-                        # 將多行縮進調整
-                        formatted_value = '\n'.join('  ' + line for line in formatted_value.split('\n'))
-                        f.write(f'  "{key}": {formatted_value}')
-                        f.write(',\n')
-                    
-                    # 寫入 rate_history（每個日期的記錄陣列在同一行）
+                # 寫入健康檢查歷史（緊湊格式）
+                if health_check_history:
+                    f.write('  "health_check_history": {\n')
+                    date_items = list(health_check_history.items())
+                    for i, (date, records) in enumerate(date_items):
+                        # 整個記錄陣列在同一行
+                        records_str = json.dumps(records, separators=(',', ':'))
+                        f.write(f'    "{date}": {records_str}')
+                        if i < len(date_items) - 1:
+                            f.write(',')
+                        f.write('\n')
+                    f.write('  }')
+                    if rate_history:
+                        f.write(',')
+                    f.write('\n')
+                
+                # 寫入 rate_history（緊湊格式）
+                if rate_history:
                     f.write('  "rate_history": {\n')
                     date_items = list(rate_history.items())
                     for i, (date, records) in enumerate(date_items):
@@ -76,13 +95,9 @@ class ServerDataManager:
                             f.write(',')
                         f.write('\n')
                     f.write('  }\n')
-                    
-                    f.write('}\n')
-            else:
-                # 沒有 rate_history 時使用標準格式
-                with open(self.data_file, 'w', encoding='utf-8') as f:
-                    json.dump(data_to_save, f, indent=2, ensure_ascii=False)
-                    
+                
+                f.write('}\n')
+                
         except Exception as e:
             logger.error("儲存數據文件失敗: " + str(e))
     
@@ -250,4 +265,108 @@ class ServerDataManager:
                     'use_everyone_mention': server_data['use_everyone_mention'],
                     'server_data': server_data
                 })
+        return servers_with_channels
+    
+    def add_health_check_record(self, health_report):
+        """添加健康檢查記錄"""
+        try:
+            now = datetime.now()
+            date_key = now.strftime("%Y-%m-%d")
+            time_key = now.strftime("%H:%M")
+            
+            # 確保健康檢查歷史結構存在
+            if 'health_check_history' not in self.data:
+                self.data['health_check_history'] = {}
+            
+            # 確保當天的記錄存在
+            if date_key not in self.data['health_check_history']:
+                self.data['health_check_history'][date_key] = []
+            
+            # 創建健康檢查記錄
+            health_record = {
+                'timestamp': now.isoformat(),
+                'time': time_key,
+                'status': health_report.get('status', 'unknown'),
+                'checks_total': len(health_report.get('checks', {})),
+                'checks_healthy': sum(1 for check in health_report.get('checks', {}).values() 
+                                    if isinstance(check, dict) and check.get('status') == 'healthy'),
+                'warnings': len(health_report.get('warnings', [])),
+                'errors': len(health_report.get('errors', []))
+            }
+            
+            # 添加記錄
+            self.data['health_check_history'][date_key].append([
+                time_key,
+                health_record['status'],
+                health_record['checks_total'],
+                health_record['checks_healthy'],
+                health_record['warnings'],
+                health_record['errors']
+            ])
+            
+            # 保持最近30天的記錄
+            cutoff_date = now - timedelta(days=30)
+            dates_to_remove = []
+            
+            for date_str in self.data['health_check_history']:
+                try:
+                    date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+                    if date_obj < cutoff_date:
+                        dates_to_remove.append(date_str)
+                except ValueError:
+                    continue
+            
+            for date_str in dates_to_remove:
+                del self.data['health_check_history'][date_str]
+            
+            self.save_data()
+            logger.debug(f"健康檢查記錄已保存: {health_record['status']}")
+            
+        except Exception as e:
+            logger.error(f"保存健康檢查記錄失敗: {e}")
+    
+    def get_health_check_history(self, days=7):
+        """獲取健康檢查歷史"""
+        try:
+            if 'health_check_history' not in self.data:
+                return {}
+            
+            if days is None:
+                return self.data['health_check_history']
+            
+            # 獲取指定天數的記錄
+            cutoff_date = datetime.now() - timedelta(days=days)
+            filtered_history = {}
+            
+            for date_str, records in self.data['health_check_history'].items():
+                try:
+                    date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+                    if date_obj >= cutoff_date:
+                        filtered_history[date_str] = records
+                except ValueError:
+                    continue
+            
+            return filtered_history
+            
+        except Exception as e:
+            logger.error(f"獲取健康檢查歷史失敗: {e}")
+            return {}
+    
+    def get_all_servers_with_channels(self):
+        """獲取所有設定了通知頻道的伺服器"""
+        servers_with_channels = []
+        for guild_id_str, server_data in self.data.items():
+            # 跳過特殊鍵值
+            if guild_id_str in ['rate_history', 'health_check_history']:
+                continue
+                
+            if isinstance(server_data, dict) and server_data.get('channel_id'):
+                servers_with_channels.append({
+                    'guild_id': int(guild_id_str),
+                    'channel_id': server_data['channel_id'],
+                    'threshold': server_data['threshold'],
+                    'use_everyone_mention': server_data['use_everyone_mention'],
+                    'server_data': server_data
+                })
+        
         return servers_with_channels

@@ -9,11 +9,13 @@ from .exchange_rate_monitor import ExchangeRateMonitor
 from .backup_manager import DataBackupManager
 from .chart_generator import RateChartGenerator
 from .notification_system import NotificationSystem
+from .system_manager import SystemManager
 
 __all__ = [
     'ServerDataManager',
     'ExchangeRateMonitor', 
     'DataBackupManager',
     'RateChartGenerator',
-    'NotificationSystem'
+    'NotificationSystem',
+    'SystemManager'
 ]
