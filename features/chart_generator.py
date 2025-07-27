@@ -33,18 +33,15 @@ class RateChartGenerator:
     async def generate_rate_chart(self, guild_id, days=7):
         """生成匯率趨勢圖"""
         server_data = self.data_manager.get_server_data(guild_id)
-        rate_history = server_data.get('rate_history', [])
+        # 使用統一的匯率歷史而不是伺服器特定的歷史
+        rate_history = self.data_manager.get_rate_history(guild_id, days)
         
         if len(rate_history) < 2:
             logger.warning("伺服器 " + str(guild_id) + " 匯率數據不足，無法生成圖表")
             return None
         
-        # 過濾最近N天的數據
-        cutoff_date = datetime.now() - timedelta(days=days)
-        filtered_data = [
-            record for record in rate_history
-            if datetime.fromisoformat(record['timestamp']) > cutoff_date
-        ]
+        # 過濾最近N天的數據（已經在 data_manager.get_rate_history 中處理）
+        filtered_data = rate_history
         
         if len(filtered_data) < 2:
             logger.warning("伺服器 " + str(guild_id) + " 最近" + str(days) + "天的數據不足")
@@ -80,15 +77,30 @@ class RateChartGenerator:
             ax.legend()
             ax.grid(True, alpha=0.3)
             
-            # 格式化x軸日期
-            if days <= 7:
-                ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d %H:%M'))
-                ax.xaxis.set_major_locator(mdates.HourLocator(interval=6))
-            else:
-                ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))
+            # 格式化x軸日期 - 優化版本
+            if days <= 3:
+                # 3天內：顯示日期+時間，水平顯示
+                ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d\n%H:%M'))
+                ax.xaxis.set_major_locator(mdates.HourLocator(interval=4))
+                rotation_angle = 0  # 水平顯示
+            elif days <= 7:
+                # 7天內：顯示日期+小時，輕微傾斜
+                ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d %H:%M'))
+                ax.xaxis.set_major_locator(mdates.HourLocator(interval=8))
+                rotation_angle = 15  # 輕微傾斜
+            elif days <= 14:
+                # 14天內：只顯示日期，水平顯示
+                ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
                 ax.xaxis.set_major_locator(mdates.DayLocator(interval=1))
+                rotation_angle = 0  # 水平顯示
+            else:
+                # 超過14天：顯示日期，間隔更大
+                ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
+                ax.xaxis.set_major_locator(mdates.DayLocator(interval=2))
+                rotation_angle = 0  # 水平顯示
             
-            plt.xticks(rotation=45)
+            # 設定旋轉角度 - 使用 plt.setp 來確保設定生效
+            plt.setp(ax.xaxis.get_majorticklabels(), rotation=rotation_angle, ha='center' if rotation_angle == 0 else 'right')
             plt.tight_layout()
             
             # 保存到記憶體
@@ -107,9 +119,11 @@ class RateChartGenerator:
     async def generate_comparison_chart(self, guild_id, comparison_days=[7, 30]):
         """生成比較圖表（多時間段對比）"""
         server_data = self.data_manager.get_server_data(guild_id)
-        rate_history = server_data.get('rate_history', [])
         
-        if len(rate_history) < 2:
+        # 獲取30天的數據（足夠覆蓋所有比較期間）
+        all_rate_history = self.data_manager.get_rate_history(guild_id, max(comparison_days))
+        
+        if len(all_rate_history) < 2:
             return None
         
         try:
@@ -120,7 +134,7 @@ class RateChartGenerator:
             for i, days in enumerate(comparison_days):
                 cutoff_date = datetime.now() - timedelta(days=days)
                 filtered_data = [
-                    record for record in rate_history
+                    record for record in all_rate_history
                     if datetime.fromisoformat(record['timestamp']) > cutoff_date
                 ]
                 
@@ -147,12 +161,20 @@ class RateChartGenerator:
                 ax.legend()
                 ax.grid(True, alpha=0.3)
                 
-                if days <= 7:
-                    ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d %H:%M'))
+                # 優化的日期格式
+                if days <= 3:
+                    ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d\n%H:%M'))
+                    ax.xaxis.set_major_locator(mdates.HourLocator(interval=4))
+                elif days <= 7:
+                    ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d %H:%M'))
+                    ax.xaxis.set_major_locator(mdates.HourLocator(interval=8))
                 else:
-                    ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))
+                    ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
+                    ax.xaxis.set_major_locator(mdates.DayLocator(interval=max(1, days//10)))
                 
-                plt.setp(ax.xaxis.get_majorticklabels(), rotation=45)
+                # 設定適合的旋轉角度
+                rotation_angle = 0 if days > 7 else 15
+                plt.setp(ax.xaxis.get_majorticklabels(), rotation=rotation_angle)
             
             plt.tight_layout()
             
@@ -170,17 +192,15 @@ class RateChartGenerator:
     async def generate_statistics_chart(self, guild_id, days=30):
         """生成統計圖表（包含統計信息）"""
         server_data = self.data_manager.get_server_data(guild_id)
-        rate_history = server_data.get('rate_history', [])
+        # 使用統一的匯率歷史
+        rate_history = self.data_manager.get_rate_history(guild_id, days)
         
         if len(rate_history) < 2:
             return None
         
         try:
-            cutoff_date = datetime.now() - timedelta(days=days)
-            filtered_data = [
-                record for record in rate_history
-                if datetime.fromisoformat(record['timestamp']) > cutoff_date
-            ]
+            # 數據已經在 data_manager.get_rate_history 中過濾了
+            filtered_data = rate_history
             
             if len(filtered_data) < 2:
                 return None
@@ -215,6 +235,20 @@ class RateChartGenerator:
             ax1.set_ylabel('Exchange Rate')
             ax1.legend()
             ax1.grid(True, alpha=0.3)
+            
+            # 優化統計圖表的x軸格式
+            if days <= 7:
+                ax1.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d\n%H:%M'))
+                ax1.xaxis.set_major_locator(mdates.HourLocator(interval=12))
+            elif days <= 14:
+                ax1.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
+                ax1.xaxis.set_major_locator(mdates.DayLocator(interval=1))
+            else:
+                ax1.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
+                ax1.xaxis.set_major_locator(mdates.DayLocator(interval=max(1, days//10)))
+            
+            # 水平顯示日期標籤
+            plt.setp(ax1.xaxis.get_majorticklabels(), rotation=0)
             
             # 統計信息文字
             stats_text = """Statistics (Last """ + str(days) + """ Days):

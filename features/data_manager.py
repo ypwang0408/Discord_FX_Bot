@@ -23,9 +23,9 @@ class ServerDataManager:
     def __init__(self, data_file="server_data.json"):
         self.data_file = data_file
         self.data = self.load_data()
-        # 初始化全域匯率歷史
-        if 'global_rate_history' not in self.data:
-            self.data['global_rate_history'] = []
+        # 初始化匯率歷史
+        if 'rate_history' not in self.data:
+            self.data['rate_history'] = []
     
     def load_data(self):
         """載入伺服器數據"""
@@ -40,10 +40,49 @@ class ServerDataManager:
             return {}
     
     def save_data(self):
-        """儲存伺服器數據"""
+        """儲存伺服器數據（混合格式：伺服器資料格式化，rate_history 緊湊）"""
         try:
-            with open(self.data_file, 'w', encoding='utf-8') as f:
-                json.dump(self.data, f, indent=2, ensure_ascii=False)
+            # 創建一個副本來處理格式化
+            data_to_save = self.data.copy()
+            
+            # 如果有 rate_history，需要特殊處理
+            if 'rate_history' in data_to_save:
+                rate_history = data_to_save['rate_history']
+                
+                # 先保存沒有 rate_history 的部分
+                temp_data = {k: v for k, v in data_to_save.items() if k != 'rate_history'}
+                
+                # 寫入文件 - 手動格式化
+                with open(self.data_file, 'w', encoding='utf-8') as f:
+                    f.write('{\n')
+                    
+                    # 寫入伺服器資料（格式化）
+                    items = list(temp_data.items())
+                    for i, (key, value) in enumerate(items):
+                        formatted_value = json.dumps(value, indent=2, ensure_ascii=False)
+                        # 將多行縮進調整
+                        formatted_value = '\n'.join('  ' + line for line in formatted_value.split('\n'))
+                        f.write(f'  "{key}": {formatted_value}')
+                        f.write(',\n')
+                    
+                    # 寫入 rate_history（每個日期的記錄陣列在同一行）
+                    f.write('  "rate_history": {\n')
+                    date_items = list(rate_history.items())
+                    for i, (date, records) in enumerate(date_items):
+                        # 整個記錄陣列在同一行
+                        records_str = json.dumps(records, separators=(',', ':'))
+                        f.write(f'    "{date}": {records_str}')
+                        if i < len(date_items) - 1:
+                            f.write(',')
+                        f.write('\n')
+                    f.write('  }\n')
+                    
+                    f.write('}\n')
+            else:
+                # 沒有 rate_history 時使用標準格式
+                with open(self.data_file, 'w', encoding='utf-8') as f:
+                    json.dump(data_to_save, f, indent=2, ensure_ascii=False)
+                    
         except Exception as e:
             logger.error("儲存數據文件失敗: " + str(e))
     
@@ -67,7 +106,7 @@ class ServerDataManager:
             # 清理舊的未使用欄位（如果存在）
             server_data = self.data[guild_id]
             unused_fields = [
-                'rate_history',  # 已改用全域歷史
+                'rate_history',  # 已改用統一的匯率歷史
                 'daily_report_enabled',  # 未實現的功能
                 'weekly_notifications',  # 未實現的功能
                 'currency_subscriptions',  # 未實現的功能
@@ -118,58 +157,89 @@ class ServerDataManager:
         self.update_server_data(guild_id, "use_everyone_mention", use_mention)
     
     def add_rate_history(self, guild_id, rate):
-        """新增匯率歷史記錄到全域歷史（優化版本）"""
+        """新增匯率歷史記錄到統一的匯率歷史（優化版本 - 日期分組格式）"""
         # 使用統一的時間精確度函數
         timestamp_str = get_minute_precision_timestamp()
+        date_part = timestamp_str[:10]  # YYYY-MM-DD
+        time_part = timestamp_str[11:16]  # HH:MM
         
-        # 確保全域匯率歷史存在
-        if 'global_rate_history' not in self.data:
-            self.data['global_rate_history'] = []
+        # 確保匯率歷史存在且為字典格式
+        if 'rate_history' not in self.data:
+            self.data['rate_history'] = {}
+        
+        # 確保當前日期的記錄存在
+        if date_part not in self.data['rate_history']:
+            self.data['rate_history'][date_part] = []
+        
+        current_day_records = self.data['rate_history'][date_part]
         
         # 檢查最後一筆記錄，避免重複添加相同時間的記錄
-        if (self.data['global_rate_history'] and 
-            self.data['global_rate_history'][-1]['timestamp'] == timestamp_str):
+        if (current_day_records and 
+            current_day_records[-1][0] == time_part):
             # 如果匯率有變化，更新記錄；否則跳過
-            if self.data['global_rate_history'][-1]['rate'] != rate:
-                self.data['global_rate_history'][-1]['rate'] = rate
+            if current_day_records[-1][1] != rate:
+                current_day_records[-1][1] = rate
                 self.save_data()
             return
         
-        # 添加新記錄
-        self.data['global_rate_history'].append({
-            'rate': rate,
-            'timestamp': timestamp_str
-        })
+        # 添加新記錄 [time, rate]
+        current_day_records.append([time_part, rate])
         
-        # 只保留最近30天的記錄，減少存儲空間
+        # 清理超過30天的舊記錄
         cutoff_date = datetime.now() - timedelta(days=30)
-        self.data['global_rate_history'] = [
-            record for record in self.data['global_rate_history']
-            if datetime.fromisoformat(record['timestamp']) > cutoff_date
-        ]
+        cutoff_date_str = cutoff_date.strftime("%Y-%m-%d")
+        
+        dates_to_remove = []
+        for date_key in self.data['rate_history'].keys():
+            if date_key < cutoff_date_str:
+                dates_to_remove.append(date_key)
+        
+        for date_key in dates_to_remove:
+            del self.data['rate_history'][date_key]
         
         self.save_data()
     
     def get_rate_history(self, guild_id=None, days=30):
-        """獲取匯率歷史記錄（從全域歷史）"""
-        # guild_id 參數保留以維持 API 兼容性，但現在使用全域歷史
-        global_history = self.data.get('global_rate_history', [])
+        """獲取匯率歷史記錄（從統一的匯率歷史 - 日期分組格式）"""
+        # guild_id 參數保留以維持 API 兼容性，但現在使用統一的匯率歷史
+        rate_history_dict = self.data.get('rate_history', {})
         
+        # 轉換為原始格式以保持兼容性
+        rate_history = []
+        
+        # 處理不同格式的兼容性
+        if isinstance(rate_history_dict, list):
+            # 舊格式 - 直接使用
+            rate_history = rate_history_dict
+        else:
+            # 新格式 - 轉換為原始格式
+            for date_str, day_records in rate_history_dict.items():
+                for time_str, rate in day_records:
+                    timestamp = f"{date_str}T{time_str}"
+                    rate_history.append({
+                        'rate': rate,
+                        'timestamp': timestamp
+                    })
+        
+        # 按時間戳排序
+        rate_history.sort(key=lambda x: x['timestamp'])
+        
+        # 過濾指定天數
         if days:
             cutoff_date = datetime.now() - timedelta(days=days)
-            global_history = [
-                record for record in global_history
+            rate_history = [
+                record for record in rate_history
                 if datetime.fromisoformat(record['timestamp']) > cutoff_date
             ]
         
-        return global_history
+        return rate_history
     
     def get_all_servers_with_channels(self):
         """獲取所有設定了通知頻道的伺服器"""
         servers_with_channels = []
         for guild_id_str, server_data in self.data.items():
-            # 跳過全域匯率歷史記錄
-            if guild_id_str == 'global_rate_history':
+            # 跳過匯率歷史記錄
+            if guild_id_str == 'rate_history':
                 continue
                 
             if isinstance(server_data, dict) and server_data.get('channel_id'):
