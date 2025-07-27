@@ -36,13 +36,13 @@ class NotificationSystem:
             embed.add_field(
                 name="當前匯率 / Current Rate",
                 value="**" + str(round(rate, 4)) + " JPY/TWD**",
-                inline=True
+                inline=False
             )
             
             embed.add_field(
                 name="設定閾值 / Threshold",
                 value="**" + str(threshold) + " JPY/TWD**",
-                inline=True
+                inline=False
             )
             
             # 分隔線
@@ -93,19 +93,19 @@ class NotificationSystem:
             embed.add_field(
                 name="匯率範圍 / Rate Range",
                 value="最低 / Low: " + str(report_data['min_rate']) + "\n最高 / High: " + str(report_data['max_rate']),
-                inline=True
+                inline=False
             )
             
             embed.add_field(
                 name="平均匯率 / Average Rate",
                 value=str(round(report_data['avg_rate'], 4)),
-                inline=True
+                inline=False
             )
             
             embed.add_field(
                 name="當前匯率 / Current Rate",
                 value=str(round(report_data['current_rate'], 4)),
-                inline=True
+                inline=False
             )
             
             # 漲跌情況
@@ -116,13 +116,13 @@ class NotificationSystem:
             embed.add_field(
                 name="日變化 / Daily Change",
                 value=change_text,
-                inline=True
+                inline=False
             )
             
             embed.add_field(
                 name="閾值比較 / Threshold Comparison",
                 value="設定值 / Set: " + str(round(report_data['threshold'], 4)) + "\n低於次數 / Below: " + str(report_data['below_threshold_count']) + "/" + str(report_data['total_checks']),
-                inline=True
+                inline=False
             )
             
             embed.set_footer(text="每日報告 / Daily Report")
@@ -152,19 +152,19 @@ class NotificationSystem:
             embed.add_field(
                 name="匯率統計 / Rate Statistics",
                 value="最低 / Min: " + str(round(report_data['min_rate'], 4)) + "\n最高 / Max: " + str(round(report_data['max_rate'], 4)) + "\n平均 / Avg: " + str(round(report_data['avg_rate'], 4)) + "\n中位數 / Median: " + str(round(report_data['median_rate'], 4)),
-                inline=True
+                inline=False
             )
             
             embed.add_field(
                 name="波動性 / Volatility",
                 value="標準差 / Std Dev: " + str(round(report_data['std_dev'], 4)) + "\n波動率 / Volatility: " + str(round(report_data['volatility'], 2)) + "%",
-                inline=True
+                inline=False
             )
             
             embed.add_field(
                 name="閾值分析 / Threshold Analysis",
                 value="設定閾值 / Threshold: " + str(round(report_data['threshold'], 4)) + "\n低於閾值比例 / Below %: " + str(round(report_data['below_threshold_percentage'], 1)) + "%",
-                inline=True
+                inline=False
             )
             
             embed.add_field(
@@ -200,7 +200,7 @@ class NotificationSystem:
             )
             
             for field_name, field_value in status_data.get('fields', {}).items():
-                embed.add_field(name=field_name, value=field_value, inline=True)
+                embed.add_field(name=field_name, value=field_value, inline=False)
             
             embed.set_footer(text="系統監控 / System Monitor")
             

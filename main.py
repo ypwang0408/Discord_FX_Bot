@@ -86,9 +86,9 @@ async def on_ready():
         print("✅ 自動備份任務已啟動")
     
     # 啟動系統管理任務
-    if not system_management_task.is_running():
-        system_management_task.start()
-        print("✅ 系統管理任務已啟動")
+    if not health_monitoring_task.is_running():
+        health_monitoring_task.start()
+        print("✅ 系統健康監控任務已啟動")
 
 # ====== Slash Commands ======
 
@@ -133,14 +133,14 @@ async def rate_slash(interaction: discord.Interaction):
         embed.add_field(
             name="監控閾值 / Threshold",
             value=f"{threshold} JPY/TWD",
-            inline=True
+            inline=False
         )
         
-        status = "✅ 高於閾值 / Above threshold" if rate >= threshold else "⚠️ 低於閾值 / Below threshold"
+        status = "❌ 高於閾值 / Above threshold" if rate >= threshold else "⚠️ 低於閾值 / Below threshold"
         embed.add_field(
             name="狀態 / Status",
             value=status,
-            inline=True
+            inline=False
         )
         
         embed.set_footer(text="資料來源: 玉山銀行 / Source: E.SUN Bank")
@@ -246,7 +246,7 @@ async def status_slash(interaction: discord.Interaction):
     last_was_above = server_data['last_was_above_threshold']
     embed.add_field(
         name="上次狀態 / Last Status",
-        value=f"{'高於閾值 / Above threshold' if last_was_above else '低於閾值 / Below threshold' if last_was_above is not None else '未知 / Unknown'}",
+        value=f"{'❌ 高於閾值 / Above threshold' if last_was_above else '⚠️ 低於閾值 / Below threshold' if last_was_above is not None else '❓ 未知 / Unknown'}",
         inline=False
     )
     
@@ -653,9 +653,14 @@ async def system_slash(interaction: discord.Interaction, detailed: bool = False)
             return
     
     # 檢查報告是否有效
-    if system_report is None or not isinstance(system_report, dict):
-        logger.error(f"系統報告無效: type={type(system_report)}, value={system_report}")
+    if system_report is None:
+        logger.error("系統報告為 None")
         await interaction.followup.send("❌ 系統報告生成失敗，請稍後重試")
+        return
+        
+    if not isinstance(system_report, dict):
+        logger.error(f"系統報告不是字典類型: type={type(system_report)}, value={system_report}")
+        await interaction.followup.send("❌ 系統報告格式錯誤，請稍後重試")
         return
     
     # 根據系統狀態設定顏色
@@ -697,6 +702,10 @@ async def system_slash(interaction: discord.Interaction, detailed: bool = False)
         # 詳細報告模式
         quick_stats = system_report.get('quick_stats', {})
         
+        # 確保 quick_stats 不是 None
+        if quick_stats is None:
+            quick_stats = {}
+        
         # 健康檢查摘要
         if quick_stats:
             embed.add_field(
@@ -722,6 +731,8 @@ async def system_slash(interaction: discord.Interaction, detailed: bool = False)
         
         # 建議
         recommendations = system_report.get('recommendations', [])
+        if recommendations is None:
+            recommendations = []
         if recommendations:
             embed.add_field(
                 name="💡 系統建議 / Recommendations",
@@ -731,11 +742,16 @@ async def system_slash(interaction: discord.Interaction, detailed: bool = False)
         
         # 維護統計
         maintenance_info = system_report.get('maintenance', {})
+        if maintenance_info is None:
+            maintenance_info = {}
         if maintenance_info and not maintenance_info.get('error'):
+            latest_activity_info = maintenance_info.get('latest_activity', {})
+            if latest_activity_info is None:
+                latest_activity_info = {}
             embed.add_field(
                 name="🔧 維護狀態 / Maintenance Status",
                 value=f"24小時活動 / 24h Activities: {maintenance_info.get('total_activities', 0)}\n"
-                      f"最新活動 / Latest: {maintenance_info.get('latest_activity', {}).get('activity_type', 'none')}",
+                      f"最新活動 / Latest: {latest_activity_info.get('activity_type', 'none')}",
                 inline=False
             )
     
@@ -891,7 +907,7 @@ async def health_slash(interaction: discord.Interaction, quick: bool = False):
                       f"✅ 健康 / Healthy: {metrics.get('checks_healthy', 0)}\n"
                       f"⚠️ 警告 / Warning: {metrics.get('checks_warning', 0)}\n"
                       f"❌ 錯誤 / Error: {metrics.get('checks_error', 0)}",
-                inline=True
+                inline=False
             )
         
         # API健康狀態
@@ -907,7 +923,7 @@ async def health_slash(interaction: discord.Interaction, quick: bool = False):
                 embed.add_field(
                     name="🌐 API健康狀態 / API Health",
                     value='\n'.join(api_summary[:4]) if api_summary else "無API檢查數據",
-                    inline=True
+                    inline=False
                 )
         
         # 資源使用詳情
@@ -923,7 +939,7 @@ async def health_slash(interaction: discord.Interaction, quick: bool = False):
                     value=f"記憶體 / Memory: {memory_info.get('percent', 0):.1f}% ({memory_info.get('used_gb', 0):.1f}GB)\n"
                           f"磁碟 / Disk: {disk_info.get('percent', 0):.1f}% ({disk_info.get('used_gb', 0):.1f}GB)\n"
                           f"CPU: {cpu_info.get('percent', 0):.1f}%",
-                    inline=True
+                    inline=False
                 )
         
         # 警告信息
@@ -978,9 +994,9 @@ async def maintenance_slash(interaction: discord.Interaction, operation: str = "
             )
             
             embed.add_field(
-                name="� 24小時統計 / 24h Statistics",
+                name="📊 24小時統計 / 24h Statistics",
                 value=f"維護活動 / Activities: {maintenance_summary.get('total_activities', 0)}",
-                inline=True
+                inline=False
             )
             
             if maintenance_summary.get('activity_breakdown'):
@@ -1021,10 +1037,10 @@ async def maintenance_slash(interaction: discord.Interaction, operation: str = "
             await interaction.response.send_message("🚨 執行緊急清理... / Performing emergency cleanup...")
         
         try:
-            maintenance_report = await system_manager.perform_system_maintenance(action)
+            maintenance_report = await system_manager.perform_system_maintenance(operation)
             
             embed = discord.Embed(
-                title=f"� {'日常維護' if action == 'daily' else '緊急清理'}報告 / {'Daily Maintenance' if action == 'daily' else 'Emergency Cleanup'} Report",
+                title=f"� {'日常維護' if operation == 'daily' else '緊急清理'}報告 / {'Daily Maintenance' if operation == 'daily' else 'Emergency Cleanup'} Report",
                 color=0x00ff00 if not maintenance_report.get('error') else 0xff0000,
                 timestamp=datetime.now()
             )
@@ -1041,17 +1057,17 @@ async def maintenance_slash(interaction: discord.Interaction, operation: str = "
                 failed_tasks = len(maintenance_report.get('tasks_failed', []))
                 
                 embed.add_field(
-                    name="� 執行結果 / Execution Results",
+                    name="📊 執行結果 / Execution Results",
                     value=f"✅ 成功任務 / Completed: {completed_tasks}\n"
                           f"❌ 失敗任務 / Failed: {failed_tasks}",
-                    inline=True
+                    inline=False
                 )
                 
                 if operation == "emergency" and maintenance_report.get('space_freed_mb'):
                     embed.add_field(
-                        name="� 空間釋放 / Space Freed",
+                        name="💾 空間釋放 / Space Freed",
                         value=f"{maintenance_report['space_freed_mb']} MB",
-                        inline=True
+                        inline=False
                     )
             
             await interaction.followup.send(embed=embed)
@@ -1202,21 +1218,24 @@ async def health_monitoring_task():
                 logger.info(f"✅ 系統健康狀態正常 - 已保存檢查記錄")
         else:
             # 備援：使用原有的健康監控器
-            health_report = await health_monitor.quick_health_check()
-            
-            if health_report['status'] != 'healthy':
-                logger.warning(f"⚠️ 系統健康狀態: {health_report['status']}")
+            if system_manager:
+                health_report = await system_manager.health_monitor.quick_health_check()
                 
-                if health_report['status'] == 'error':
-                    detailed_report = await health_monitor.comprehensive_health_check()
-                    logger.error(f"❌ 系統健康檢查發現問題: {detailed_report.get('errors', [])}")
-            
-            # 檢查是否需要自動重啟
-            if health_monitor.consecutive_failures >= 3:
-                logger.warning(f"🔄 連續失敗 {health_monitor.consecutive_failures} 次，考慮自動重啟")
-                restart_attempted = await auto_maintenance.auto_restart_on_critical_failure()
-            if restart_attempted:
-                logger.info("🔄 已啟動自動重啟程序")
+                if health_report['status'] != 'healthy':
+                    logger.warning(f"⚠️ 系統健康狀態: {health_report['status']}")
+                    
+                    if health_report['status'] == 'error':
+                        detailed_report = await system_manager.health_monitor.comprehensive_health_check()
+                        logger.error(f"❌ 系統健康檢查發現問題: {detailed_report.get('errors', [])}")
+                
+                # 檢查是否需要自動重啟
+                if system_manager.health_monitor.consecutive_failures >= 3:
+                    logger.warning(f"🔄 連續失敗 {system_manager.health_monitor.consecutive_failures} 次，考慮自動重啟")
+                    restart_attempted = await system_manager.auto_maintenance.auto_restart_on_critical_failure()
+                    if restart_attempted:
+                        logger.info("🔄 已啟動自動重啟程序")
+            else:
+                logger.warning("⚠️ 系統管理器未初始化，跳過健康檢查")
                 
     except Exception as e:
         logger.error(f"健康監控任務異常: {e}")
@@ -1230,18 +1249,21 @@ async def daily_maintenance_task():
         if now.hour == 2:
             logger.info("🔧 開始執行每日自動運維任務...")
             
-            maintenance_report = await auto_maintenance.run_daily_maintenance()
-            
-            # 記錄維護結果
-            completed_tasks = len(maintenance_report.get('tasks_completed', []))
-            failed_tasks = len(maintenance_report.get('tasks_failed', []))
-            warnings = len(maintenance_report.get('warnings', []))
-            
-            logger.info(f"✅ 每日運維完成: {completed_tasks} 成功, {failed_tasks} 失敗, {warnings} 警告")
-            
-            # 如果有失敗的任務，記錄詳細信息
-            if failed_tasks > 0:
-                logger.warning(f"⚠️ 運維任務失敗項目: {maintenance_report.get('tasks_failed', [])}")
+            if system_manager:
+                maintenance_report = await system_manager.auto_maintenance.run_daily_maintenance()
+                
+                # 記錄維護結果
+                completed_tasks = len(maintenance_report.get('tasks_completed', []))
+                failed_tasks = len(maintenance_report.get('tasks_failed', []))
+                warnings = len(maintenance_report.get('warnings', []))
+                
+                logger.info(f"✅ 每日運維完成: {completed_tasks} 成功, {failed_tasks} 失敗, {warnings} 警告")
+                
+                # 如果有失敗的任務，記錄詳細信息
+                if failed_tasks > 0:
+                    logger.warning(f"⚠️ 運維任務失敗項目: {maintenance_report.get('tasks_failed', [])}")
+            else:
+                logger.warning("⚠️ 系統管理器未初始化，跳過每日維護")
                 
     except Exception as e:
         logger.error(f"每日運維任務異常: {e}")
