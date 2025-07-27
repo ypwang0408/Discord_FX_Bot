@@ -1,9 +1,20 @@
 # 玉山銀行日幣匯率監控 Discord 機器人
 # E.SUN Bank JPY Exchange Rate Monitor Discord Bot
 
-一個自動監控玉山銀行日幣匯率的Discord機器人，採用現代化模組架構設計，具備智能通知、圖表生成、自動備份等功能。
+一個自動監控玉山銀行日幣匯率的Discord機器人，採用現代化模組架構設計，具備智能通知、圖表生成、健康監控、自動備份等功能。
 
-A Discord bot that automatically monitors E.SUN Bank's JPY exchange rate with modern modular architecture, featuring smart notifications, chart generation, and automatic backup.
+A Discord bot that automatically monitors E.SUN Bank's JPY exchange rate with modern modular architecture, featuring smart notifications, chart generation, health monitoring, and automatic backup.
+
+## 📚 文檔導航 / Documentation
+
+| 📖 文檔 | 📝 描述 | 🔗 連結 |
+|---------|---------|---------|
+| **快速開始** | 安裝、部署和初始設定指南 | [📦 INSTALLATION.md](docs/INSTALLATION.md) |
+| **指令手冊** | 完整的 Discord 指令使用說明 | [🎮 COMMANDS.md](docs/COMMANDS.md) |
+| **Bot 管理** | 啟動、停止、狀態檢查等管理操作 | [🤖 BOT_MANAGEMENT.md](docs/BOT_MANAGEMENT.md) |
+| **健康監控** | 系統健康檢查和自動化運維功能 | [🏥 HEALTH_MONITORING.md](docs/HEALTH_MONITORING.md) |
+| **功能總結** | 完整功能列表和技術架構說明 | [🎯 FEATURE_SUMMARY.md](docs/FEATURE_SUMMARY.md) |
+| **故障排除** | 常見問題診斷和解決方案 | [🔧 TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) |
 
 ## ✨ 核心特色 / Key Features
 
@@ -21,7 +32,12 @@ A Discord bot that automatically monitors E.SUN Bank's JPY exchange rate with mo
 ### 💾 數據管理
 - **智能備份**: 每日自動備份，超過7天只保留星期一的備份
 - **數據持久化**: JSON格式存儲，支援手動備份和恢復
-- **完整記錄**: 包含時間戳、檔案大小、伺服器數量等詳細信息
+- **健康檢查記錄**: 自動保存系統健康狀態，便於分析系統趨勢
+
+### 🏥 健康監控系統
+- **全面檢查**: API狀態、系統資源、數據完整性、文件系統
+- **自動維護**: 日誌清理、備份管理、性能優化
+- **智能警報**: 自動檢測異常並記錄，支援自動恢復
 
 ### ⚡ 現代化介面
 - **Slash Commands**: 完全支援Discord最新的斜線命令
@@ -35,11 +51,14 @@ discord-bot/
 ├── main.py                  # 主程式入口
 ├── features/               # 功能模組目錄
 │   ├── __init__.py         # 模組初始化
-│   ├── data_manager.py     # 數據管理模組
-│   ├── exchange_rate_monitor.py  # 匯率監控模組
+│   ├── data_manager.py     # 數據管理模組 (含健康檢查記錄)
+│   ├── exchange_rate_monitor.py  # 匯率監控模組 (API優化)
 │   ├── backup_manager.py   # 備份管理模組
 │   ├── chart_generator.py  # 圖表生成模組
-│   └── notification_system.py    # 通知系統模組
+│   ├── notification_system.py    # 通知系統模組
+│   ├── health_monitor.py   # 健康監控模組 (新增)
+│   ├── auto_maintenance.py # 自動化運維模組 (新增)
+│   └── system_manager.py   # 系統整合管理模組 (新增)
 ├── scripts/                # 輔助腳本目錄
 │   ├── start.sh           # 啟動腳本
 │   ├── stop.sh            # 停止腳本
@@ -49,74 +68,54 @@ discord-bot/
 └── requirements.txt        # Python依賴
 ```
 
-## 🚀 快速開始
+## 🚀 快速開始 / Quick Start
 
-### 📋 系統需求
-- Python 3.8+
-- Discord Bot Token
-- 穩定的網路連接
+### 📋 系統需求 / Requirements
+- **Python**: 3.8+ (推薦 3.9+)
+- **作業系統**: Linux, macOS, Windows
+- **Discord Bot Token**: 需要創建 Discord Application
+- **網路連接**: 穩定的網際網路連接
 
-### ⚙️ 安裝步驟
+### ⚡ 快速安裝 / Quick Installation
+```bash
+# 1. Clone 專案
+git clone <your-repo-url>
+cd Discord_FX_Bot
 
-1. **Clone專案並進入目錄**
-   ```bash
-   git clone <your-repo>
-   cd discord-bot
-   ```
+# 2. 創建虛擬環境
+python3 -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
 
-2. **設定虛擬環境**
-   ```bash
-   python3 -m venv venv
-   source venv/bin/activate
-   pip install -r requirements.txt
-   ```
+# 3. 安裝依賴
+pip install -r requirements.txt
 
-3. **配置環境變數**
-   ```bash
-   # 創建 .env 檔案
-   echo "DISCORD_BOT_TOKEN=your_bot_token_here" > .env
-   ```
+# 4. 設定環境變數
+echo "DISCORD_BOT_TOKEN=your_bot_token_here" > .env
 
-4. **啟動機器人**
-   ```bash
-   # 推薦使用統一管理腳本
-   ./bot.sh start
-   
-   # 或使用基本啟動腳本
-   ./scripts/start.sh
-   ```
+# 5. 啟動 Bot
+./bot.sh start
+```
 
-5. **驗證運行狀態**
-   ```bash
-   ./bot.sh status
-   ```
+> 📖 **詳細安裝指南**: 請參考 [INSTALLATION.md](docs/INSTALLATION.md) 獲得完整的部署指南
 
-## 🎮 Discord 指令完整列表
+## 🎮 主要指令 / Main Commands
 
-### 📊 基本功能
-| 指令 | 說明 | 範例 | 權限需求 |
-|------|------|------|----------|
-| `/rate` | 查詢當前日幣匯率 | `/rate` | 無 |
-| `/threshold` | 設定監控閾值 | `/threshold 0.21` | 管理員 |
-| `/channel` | 設定通知頻道為當前頻道 | `/channel` | 無 |
-| `/status` | 查看機器人運行狀態 | `/status` | 無 |
-| `/help` | 顯示幫助訊息 | `/help` | 無 |
-| `/rules` | 顯示通知規則說明 | `/rules` | 無 |
+### 📊 基本功能 / Basic Features
+| 指令 | 說明 | 範例 |
+|------|------|------|
+| `/rate` | 查詢當前日幣匯率 | `/rate` |
+| `/threshold` | 設定監控閾值 | `/threshold 0.21` |
+| `/chart` | 生成匯率趨勢圖表 | `/chart days:7` |
+| `/status` | 查看機器人狀態 | `/status` |
 
-### 📈 進階功能
-| 指令 | 說明 | 範例 | 參數說明 |
-|------|------|------|----------|
-| `/chart` | 生成匯率趨勢圖表 | `/chart days:7` | days: 1-30天 |
-| `/backup` | 手動創建數據備份 | `/backup` | 管理員限定 |
-| `/list_backups` | 列出所有備份檔案 | `/list_backups` | 管理員限定 |
-
-### 🔧 系統管理
+### 🔧 系統管理 / System Management
 | 指令 | 說明 | 功能描述 |
 |------|------|----------|
-| `/system` | 全面系統狀態檢查 | API狀態、監控狀態、多伺服器統計 |
-| `/permissions` | 檢查機器人權限 | 驗證必要權限是否正確設定 |
-| `/sync` | 手動同步Slash Commands | 重新註冊所有斜線命令 |
-| `/mention` | 設定@everyone通知 | 啟用/停用群組通知功能 |
+| `/system` | 系統狀態檢查 | 整體狀態、資源使用、健康監控 |
+| `/health` | 健康監控檢查 | API狀態、系統資源、數據完整性 |
+| `/maintenance` | 系統維護操作 | 日誌清理、備份管理、性能優化 |
+
+> 📖 **完整指令手冊**: 查看 [COMMANDS.md](docs/COMMANDS.md) 獲得所有指令的詳細說明
 
 ## 🧠 智能通知邏輯
 
@@ -151,54 +150,32 @@ discord-bot/
 - 支援 `/list_backups` 查看所有備份
 - 備份驗證和完整性檢查
 
-## 🛠️ 管理工具
+## 🛠️ 管理工具 / Management Tools
 
-### 🎯 統一管理腳本 (`./bot.sh`)
+### 🎯 統一管理腳本 / Unified Management Script
 ```bash
-./bot.sh start    # 啟動機器人
-./bot.sh stop     # 停止機器人  
-./bot.sh restart  # 重啟機器人
-./bot.sh status   # 檢查狀態
-./bot.sh logs     # 查看即時日誌
-./bot.sh test     # 測試模組架構
+./bot.sh start    # 啟動機器人 / Start bot
+./bot.sh stop     # 停止機器人 / Stop bot
+./bot.sh restart  # 重啟機器人 / Restart bot
+./bot.sh status   # 檢查狀態 / Check status
+./bot.sh logs     # 查看即時日誌 / View logs
+./bot.sh test     # 測試模組架構 / Test modules
 ```
 
-### 📋 獨立腳本
-- `scripts/start.sh` - 啟動腳本 (含環境檢查)
-- `scripts/stop.sh` - 安全停止腳本 (含進程清理)
-- `scripts/status.sh` - 狀態檢查腳本 (含PID資訊)
+> � **詳細管理指南**: 查看 [BOT_MANAGEMENT.md](docs/BOT_MANAGEMENT.md) 了解完整的管理操作
 
-### 🖥️ tmux會話管理
-```bash
-# 連接到bot會話
-tmux attach -t discord-bot
+## 🔐 必要權限 / Required Permissions
 
-# 分離會話 (不停止bot)
-Ctrl+B, 然後按 D
+Discord Bot 需要以下權限才能正常運作：
+- ✅ **Send Messages** - 發送訊息
+- ✅ **Use Slash Commands** - 使用斜線命令  
+- ✅ **Embed Links** - 嵌入連結
+- ✅ **Read Message History** - 讀取訊息歷史
+- 🔔 **Mention Everyone** - @everyone 通知 (可選)
 
-# 查看所有會話
-tmux list-sessions
-
-# 直接終止會話
-tmux kill-session -t discord-bot
+### 📝 邀請連結 / Invite Link
 ```
-
-## 🔐 權限設定
-
-### 🎯 Discord Bot 權限需求
-**必要權限**:
-- ✅ Send Messages (發送訊息)
-- ✅ Use Slash Commands (使用斜線命令)
-- ✅ Embed Links (嵌入連結)
-- ✅ Read Message History (讀取訊息歷史)
-
-**可選權限**:
-- 🔔 Mention Everyone (@everyone通知功能)
-
-### 📝 OAuth2 設定
-```
-Scopes: bot + applications.commands
-Permissions: 2147502080 (基本) 或 2147633152 (含@everyone)
+https://discord.com/api/oauth2/authorize?client_id=YOUR_BOT_ID&permissions=2147633152&scope=bot%20applications.commands
 ```
 
 ### 🔗 邀請連結範例
@@ -212,115 +189,65 @@ https://discord.com/api/oauth2/authorize?client_id=YOUR_BOT_ID&permissions=21476
 - **玉山銀行官網**: 即時匯率資料
 - **備用API**: 國際匯率API (容錯機制)
 
-### 💱 匯率格式說明
-- **格式**: JPY/TWD (1日圓 = X台幣)
-- **預設閾值**: 0.2 (當1日圓 < 0.2台幣時通知)
-- **精度**: 小數點後4位
+## 🔍 需要幫助？ / Need Help?
 
-### 📊 歷史資料管理
-- **保存期限**: 30天
-- **更新頻率**: 每次檢查時自動更新
-- **用途**: 圖表生成和趨勢分析
+### � 查看相關文檔 / Check Documentation
+- **遇到問題**: [🔧 TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) - 故障排除指南
+- **了解功能**: [🎯 FEATURE_SUMMARY.md](docs/FEATURE_SUMMARY.md) - 完整功能說明  
+- **健康監控**: [🏥 HEALTH_MONITORING.md](docs/HEALTH_MONITORING.md) - 系統監控功能
 
-## 🐛 故障排除
-
-### ❌ 常見問題
-
-**1. Bot無法啟動**
+### � 快速診斷 / Quick Diagnosis
 ```bash
-# 檢查模組是否正常
+# 1. 檢查系統狀態
+./bot.sh status
+
+# 2. 測試模組完整性  
 ./bot.sh test
 
-# 查看詳細錯誤日誌
+# 3. 查看即時日誌
 ./bot.sh logs
 
-# 檢查環境變數
-cat .env
+# 4. 在 Discord 中檢查
+/system detailed:True
 ```
 
-**2. 匯率無法獲取**
-```bash
-# 檢查系統狀態
-/system  # 在Discord中執行
+### � 系統效能 / Performance Metrics
+- **記憶體使用**: ~50MB
+- **CPU 使用**: <1% (平時), <5% (檢查時)
+- **API 頻率**: 每30分鐘 1次 (已優化)
+- **多伺服器**: 支援無限制數量
 
-# 查看API狀態
-tail -f bot.log | grep "API"
-```
+## 🆕 更新日誌 / Changelog
 
-**3. 通知未發送**
-```bash
-# 檢查權限設定
-/permissions  # 在Discord中執行
-
-# 確認頻道設定
-/status  # 在Discord中執行
-```
-
-**4. 進程殘留問題**
-```bash
-# 查看相關進程
-ps aux | grep main.py
-
-# 強制終止
-pkill -f main.py
-
-# 清理tmux會話
-tmux kill-server
-```
-
-### 🔧 維護建議
-
-**定期檢查**:
-- 每週檢查備份檔案狀態
-- 定期查看 `bot.log` 日誌
-- 監控磁碟空間使用情況
-
-**更新流程**:
-1. 停止機器人: `./bot.sh stop`
-2. 備份當前數據: `cp server_data.json server_data_backup.json`
-3. 更新程式碼
-4. 測試模組: `./bot.sh test`
-5. 重新啟動: `./bot.sh start`
-
-## 📊 效能指標
-
-### ⚡ 系統效能
-- **記憶體使用**: ~50MB (包含虛擬環境)
-- **CPU使用**: 平時 <1%, 檢查時 <5%
-- **磁碟使用**: ~100MB (包含依賴和備份)
-
-### 🌐 網路需求
-- **API請求頻率**: 每30分鐘 1-2次
-- **資料傳輸量**: <1KB per request
-- **容錯機制**: 3次重試 + 備用API
-
-### 📈 擴展性
-- **多伺服器支援**: 無限制
-- **用戶並發**: Discord API限制內
-- **資料增長**: 線性增長，自動清理舊資料
-
-## 🆕 更新日誌
+### v2.1.0 (2025-07-27) 🆕
+- ✨ **健康監控系統**: 全面的系統健康檢查和自動維護
+- ⚡ **API 調用優化**: 減少50% API請求次數
+- 💾 **健康檢查記錄持久化**: 自動保存健康狀態歷史
+- 📁 **文檔重組**: 模組化文檔結構，更易於導航
+- 🔧 **系統整合**: 統一的系統管理架構
 
 ### v2.0.0 (2025-07-26)
 - ✨ 完全重構為模組化架構
-- 🎯 全面支援Slash Commands
+- 🎯 全面支援 Slash Commands
 - 📊 新增圖表生成功能
-- 💾 智能備份系統 (每日+智能清理)
+- 💾 智能備份系統
 - 🔧 統一管理腳本
-- 🐛 修復rate_history KeyError問題
 
-### v1.x (Legacy)
-- 🔄 基本匯率監控功能
-- 📢 簡單通知系統
+## 📞 支援與貢獻 / Support & Contributing
 
-## 📞 支援與貢獻
+### 🤝 如何貢獻 / How to Contribute
+1. Fork 專案 / Fork the project
+2. 創建功能分支 / Create feature branch (`git checkout -b feature/AmazingFeature`)
+3. 提交變更 / Commit changes (`git commit -m 'Add AmazingFeature'`)
+4. 推送到分支 / Push to branch (`git push origin feature/AmazingFeature`)
+5. 開啟 Pull Request / Open Pull Request
 
-### 🤝 如何貢獻
-1. Fork 專案
-2. 創建功能分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交變更 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 開啟 Pull Request
+### 📋 問題回報 / Issue Reporting
+在 GitHub Issues 中提供以下資訊：
+- 錯誤描述和重現步驟
+- `./bot.sh test` 輸出結果
+- 相關日誌內容 (`bot.log`)
+- 系統環境資訊
 
 ### 📋 問題回報
 請在 GitHub Issues 中提供:
