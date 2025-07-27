@@ -1,4 +1,4 @@
-# 🤖 Discord Bot 管理指南
+# :robot: Discord Bot 管理指南
 
 ## 快速啟動
 
@@ -35,7 +35,7 @@
 ./scripts/stop.sh
 ```
 
-## 📋 腳本說明
+## :clipboard: 腳本說明
 
 ### `bot.sh` - 統一管理腳本
 - **功能**: 所有bot管理操作的統一入口
@@ -55,7 +55,7 @@
 - **功能**: 安全停止bot和清理進程
 - **清理**: 終止tmux會話和相關進程
 
-## 🔧 tmux 常用命令
+## :wrench: tmux 常用命令
 
 ```bash
 # 查看所有會話
@@ -71,7 +71,7 @@ Ctrl+B, 然後按 D
 tmux kill-session -t discord-bot
 ```
 
-## 📊 模組架構
+## :bar_chart: 模組架構
 
 ```
 features/
@@ -80,10 +80,30 @@ features/
 ├── exchange_rate_monitor.py # 匯率監控  
 ├── backup_manager.py        # 備份管理(每日一次，檔名YYYYMMDD.json)
 ├── chart_generator.py       # 圖表生成
-└── notification_system.py   # 通知系統
+├── notification_system.py   # 通知系統
+├── health_monitor.py        # 健康監控系統 :new:
+├── auto_maintenance.py      # 自動化運維 :new:
+└── system_manager.py        # 系統整合管理 :new:
 ```
 
-## 🚀 首次設置
+## :alarm_clock: 自動化任務調度 :new:
+
+### 精準時間調度系統
+- **匯率檢查**: 每小時整點和30分 (10:00, 10:30, 11:00...)
+- **健康檢查**: 每小時15分和45分 (10:15, 10:45, 11:15...)  
+- **每日備份**: 每天0:00自動執行
+- **每日維護**: 每天2:00自動執行，包含：
+  - 詳細健康檢查
+  - 系統清理和優化
+  - 任務重新調度（防止時間漂移）
+  - 維護後健康檢查驗證
+
+### 任務生命週期管理
+- **全域追蹤**: 使用任務變數追蹤運行狀態
+- **優雅取消**: 支援任務安全取消和重啟
+- **狀態監控**: 透過 `/status` 查看任務實際狀態
+
+## :rocket: 首次設置
 
 1. **確保環境變數設定**:
    ```bash
@@ -102,7 +122,7 @@ features/
    ./bot.sh start
    ```
 
-## 🔍 故障排除
+## :mag: 故障排除
 
 ### Bot無法啟動
 ```bash
@@ -131,8 +151,10 @@ tmux list-sessions
 tmux kill-server
 ```
 
-## ✨ 特色功能
+## :sparkles: 特色功能
 
+- **精準時間調度**: 完全消除輪詢機制，使用計算睡眠時間實現精確觸發 :new:
+- **任務生命週期管理**: 全域任務追蹤，支援優雅取消和重啟 :new:
 - **模組化架構**: 易於維護和擴展
 - **智慧啟動**: 自動檢查環境和依賴
 - **安全停止**: 完整清理進程和會話
@@ -140,10 +162,13 @@ tmux kill-server
 - **狀態監控**: 即時查看運行狀態
 - **智能備份**: 每日備份，超過7天只保留星期一
 - **錯誤處理**: 完善的異常處理機制
+- **系統整合**: 健康監控和自動維護完整整合 :new:
 
-## 📱 Discord 指令
+## :iphone: Discord 指令
 
 啟動後，在Discord中可使用以下斜線命令：
+
+### 基本功能
 - `/rate` - 查詢當前匯率
 - `/threshold` - 設定監控閾值
 - `/status` - 查看bot狀態  
@@ -151,6 +176,11 @@ tmux kill-server
 - `/backup` - 手動創建備份
 - `/list_backups` - 列出所有備份
 - `/help` - 查看完整指令說明
+
+### 系統管理功能 :new:
+- `/system [detailed]` - 系統狀態檢查 (快速/詳細)
+- `/health [quick]` - 健康監控檢查 (快速/全面)
+- `/maintenance [operation]` - 系統維護管理 (摘要/每日/緊急)
 
 ---
 **注意**: 使用 `main.py` 作為主程式，這是重新設計的模組化版本。

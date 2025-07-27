@@ -1,6 +1,6 @@
-# 🚀 安裝與部署指南
+# :rocket: 安裝與部署指南
 
-## 📋 系統需求
+## :clipboard: 系統需求
 
 ### 硬體需求
 - **CPU**: 1核心以上 (推薦 2核心)
@@ -14,7 +14,12 @@
 - **Git**: 用於程式碼管理
 - **tmux**: 用於後台執行 (可選但推薦)
 
-## 🔧 環境準備
+### 系統特色
+- **精準時間調度**: 替代傳統輪詢機制，提供準確的定時執行
+- **整合健康監控**: 自動監控系統狀態和API可用性
+- **自動化運維**: 每日維護、備份管理、性能優化
+
+## :wrench: 環境準備
 
 ### 1. 更新系統套件
 ```bash
@@ -40,7 +45,7 @@ sudo useradd -m -s /bin/bash discord-bot
 sudo su - discord-bot
 ```
 
-## 📦 安裝步驟
+## :package: 安裝步驟
 
 ### 1. 下載程式碼
 ```bash
@@ -86,7 +91,7 @@ EOF
 chmod 600 .env
 ```
 
-## 🤖 Discord Bot 設定
+## :robot: Discord Bot 設定
 
 ### 1. 創建 Discord Application
 1. 前往 [Discord Developer Portal](https://discord.com/developers/applications)
@@ -121,7 +126,7 @@ chmod 600 .env
    - ✅ Mention Everyone (可選)
 4. 複製生成的 URL 並邀請 Bot 到伺服器
 
-## 🔧 初始測試
+## :wrench: 初始測試
 
 ### 1. 測試模組完整性
 ```bash
@@ -169,28 +174,44 @@ asyncio.run(test_api())
 "
 ```
 
-## 🚀 啟動服務
+## :rocket: 啟動服務
 
-### 1. 首次啟動
+### 1. 首次啟動 :new:
 ```bash
 # 使用統一管理腳本啟動
 ./bot.sh start
 
 # 預期輸出：
-# 🚀 啟動 Discord 機器人...
+# :rocket: 啟動 Discord 機器人...
 # ✅ 環境檢查通過
 # ✅ 在 tmux 會話 'discord-bot' 中啟動機器人
-# 📋 使用 './bot.sh status' 檢查狀態
-# 📋 使用 './bot.sh logs' 查看即時日誌
+# ✅ 匯率檢查任務已啟動（每小時整點和30分）
+# ✅ 健康檢查任務已啟動（每小時15分和45分）
+# ✅ 每日0:00自動備份任務已啟動
+# ✅ 每日凌晨2:00維護任務已啟動
+# :clipboard: 使用 './bot.sh status' 檢查狀態
+# :clipboard: 使用 './bot.sh logs' 查看即時日誌
 ```
 
-### 2. 驗證運行狀態
+### 2. 驗證運行狀態 🆕
 ```bash
 # 檢查狀態
 ./bot.sh status
 
 # 查看即時日誌
 ./bot.sh logs
+
+# 檢查精準時間調度
+./bot.sh logs | grep "下次.*檢查時間"
+
+# 預期看到：
+# ⏰ 下次匯率檢查時間: 14:30 (25.3分鐘後)
+# ⏰ 下次健康檢查時間: 14:15 (10.2分鐘後)
+
+# 在Discord中測試新功能
+/system        # 快速系統檢查
+/health        # 健康狀態檢查
+/status        # Bot運行狀態（現在顯示任務狀態）
 
 # 或查看歷史日誌
 tail -f bot.log
@@ -204,7 +225,7 @@ tail -f bot.log
 /status  # 檢查 Bot 狀態
 ```
 
-## 🔄 系統服務化 (可選)
+## :arrows_clockwise: 系統服務化 (可選)
 
 ### 1. 創建 systemd 服務檔案
 ```bash
@@ -260,7 +281,7 @@ sudo systemctl stop discord-fx-bot
 sudo systemctl disable discord-fx-bot
 ```
 
-## 🛡️ 安全性設定
+## :shield:️ 安全性設定
 
 ### 1. 檔案權限
 ```bash
@@ -311,7 +332,7 @@ crontab -e
 # 0 2 * * * /home/discord-bot/Discord_FX_Bot/backup_bot.sh
 ```
 
-## 🔍 故障排除
+## :mag: 故障排除
 
 ### 常見問題 1: Python 版本問題
 ```bash
@@ -358,7 +379,7 @@ find . -type f -name "*.sh" -exec chmod +x {} \;
 3. 確認 .env 檔案格式正確
 4. 重新生成 Token
 
-## 📊 效能監控
+## :bar_chart: 效能監控 🆕
 
 ### 1. 系統資源監控
 ```bash
@@ -372,17 +393,42 @@ df -h
 du -sh Discord_FX_Bot/
 ```
 
-### 2. 應用程式監控
+### 2. 應用程式監控（新增整合指令）🆕
 ```bash
 # 使用內建指令
 ./bot.sh status
 
-# 或在 Discord 中
-/system detailed:True
-/health quick:False
+# 或在 Discord 中使用新的整合指令
+/system detailed:True    # 詳細系統報告
+/health quick:False      # 全面健康檢查
+/maintenance summary     # 維護狀態摘要
+
+# 檢查精準調度狀態
+/status  # 現在顯示任務運行狀態和下次檢查時間
 ```
 
-### 3. 日誌分析
+### 3. 日誌分析 🆕
+```bash
+# 查看調度相關日誌
+./bot.sh logs | grep -E "(下次.*檢查時間|任務.*調度)"
+
+# 查看維護日誌
+./bot.sh logs | grep -E "(維護.*完成|系統.*狀態)"
+
+# 查看健康檢查日誌
+./bot.sh logs | grep -E "(健康.*檢查|系統.*健康)"
+```
+
+### 4. 新系統特色監控 🆕
+- **精準時間**: 監控調度時間準確性
+- **任務狀態**: 全域任務變數狀態追蹤
+- **健康歷史**: 系統健康變化趨勢
+- **維護記錄**: 自動維護執行情況
+
+---
+*安裝指南版本: v2.0*  
+*最後更新: 2025-07-27*  
+*新增: 精準時間調度系統、整合健康監控、自動化運維*
 ```bash
 # 分析錯誤日誌
 grep -i error bot.log | tail -20
