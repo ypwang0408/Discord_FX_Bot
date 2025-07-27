@@ -57,6 +57,10 @@ except Exception as e:
     logger.error(f"❌ 系統管理器初始化失敗: {e}")
     system_manager = None
 
+# 全域任務追蹤器
+rate_check_task = None
+health_check_task = None
+
 # ====== Bot 事件 ======
 
 @bot.event
@@ -75,20 +79,22 @@ async def on_ready():
         print(f"❌ 同步 Slash Commands 失敗: {e}")
         print("提示：確保機器人有 'applications.commands' 權限")
     
-    # 啟動定期檢查任務
-    if not check_exchange_rate.is_running():
-        check_exchange_rate.start()
-        print("✅ 定期檢查任務已啟動")
+    # 啟動匯率檢查任務（每小時整點和30分）
+    global rate_check_task, health_check_task
+    rate_check_task = asyncio.create_task(schedule_rate_check())
+    print("✅ 匯率檢查任務已啟動（每小時整點和30分）")
     
-    # 啟動自動備份任務
-    if not auto_backup.is_running():
-        auto_backup.start()
-        print("✅ 自動備份任務已啟動")
+    # 啟動健康檢查任務（每小時15分和45分）
+    health_check_task = asyncio.create_task(schedule_health_check())
+    print("✅ 健康檢查任務已啟動（每小時15分和45分）")
     
-    # 啟動系統管理任務
-    if not health_monitoring_task.is_running():
-        health_monitoring_task.start()
-        print("✅ 系統健康監控任務已啟動")
+    # 啟動每日0:00自動備份任務
+    asyncio.create_task(schedule_daily_backup())
+    print("✅ 每日0:00自動備份任務已啟動")
+    
+    # 啟動每日凌晨2:00維護任務
+    asyncio.create_task(schedule_daily_maintenance())
+    print("✅ 每日凌晨2:00維護任務已啟動")
 
 # ====== Slash Commands ======
 
@@ -252,7 +258,7 @@ async def status_slash(interaction: discord.Interaction):
     
     embed.add_field(
         name="監控狀態 / Monitor Status",
-        value=f"{'✅ 運行中 / Running' if check_exchange_rate.is_running() else '❌ 已停止 / Stopped'}",
+        value="✅ 運行中 / Running",
         inline=False
     )
     
@@ -455,11 +461,12 @@ async def help_slash(interaction: discord.Interaction):
         value="• 輸入 `/` 即可看到所有指令並自動補全 / Type `/` to see all commands with autocomplete\n"
               "• 機器人會在整點和30分自動檢查匯率 / Bot automatically checks rate at :00 and :30\n"
               "• 智慧通知系統避免重複訊息 / Smart notification system prevents spam\n"
-              "• 每個伺服器有獨立的設定 / Each server has independent settings",
+              "• 每個伺服器有獨立的設定 / Each server has independent settings\n"
+              "• 系統在15分和45分進行健康檢查 / Health checks at :15 and :45",
         inline=False
     )
     
-    embed.set_footer(text="機器人在整點和30分檢查匯率，智慧通知避免重複 / Bot checks rate at :00 and :30, smart notifications to avoid spam")
+    embed.set_footer(text="匯率檢查: 整點和30分 | 健康檢查: 15分和45分 / Rate check: :00 & :30 | Health check: :15 & :45")
     
     await interaction.response.send_message(embed=embed)
 
@@ -474,7 +481,8 @@ async def rules_slash(interaction: discord.Interaction):
     
     embed.add_field(
         name="🕐 檢查時間 / Check Schedule",
-        value="每小時的整點和30分 / Every hour at :00 and :30",
+        value="匯率檢查: 每小時的整點和30分 / Rate check: Every hour at :00 and :30\n"
+              "健康檢查: 每小時的15分和45分 / Health check: Every hour at :15 and :45",
         inline=False
     )
     
@@ -792,7 +800,7 @@ async def system_slash(interaction: discord.Interaction, detailed: bool = False)
         name="🤖 Bot資訊 / Bot Info",
         value=f"名稱 / Name: {bot.user.name}\n"
               f"延遲 / Latency: {round(bot.latency * 1000)}ms\n"
-              f"監控狀態 / Monitor: {'✅ 運行中' if check_exchange_rate.is_running() else '❌ 已停止'}",
+              f"監控狀態 / Monitor: {'✅ 運行中' if rate_check_task and not rate_check_task.cancelled() else '❌ 已停止'}",
         inline=False
     )
     
@@ -1076,18 +1084,43 @@ async def maintenance_slash(interaction: discord.Interaction, operation: str = "
             logger.error(f"維護操作失敗: {e}")
             await interaction.followup.send(f"❌ 維護操作失敗: {str(e)}")
 
-# ====== 定期任務 ======
+# ====== 日常維護任務調度 ======
 
-@tasks.loop(minutes=1)  # 每分鐘檢查一次，但只在特定時間執行
-async def check_exchange_rate():
-    """定期檢查匯率並發送通知（優化版：API只調用一次）"""
-    # 取得當前時間
-    now = datetime.now()
-    
-    # 只在整點或30分時執行
-    if now.minute not in [0, 30]:
-        return
-    
+async def schedule_rate_check():
+    """每小時整點和30分執行匯率檢查"""
+    while True:
+        try:
+            # 計算到下一個整點或30分的時間
+            now = datetime.now()
+            next_check_time = None
+            
+            if now.minute < 30:
+                # 到30分
+                next_check_time = now.replace(minute=30, second=0, microsecond=0)
+            else:
+                # 到下一個整點
+                next_check_time = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+            
+            sleep_seconds = (next_check_time - now).total_seconds()
+            
+            logger.info(f"⏰ 下次匯率檢查時間: {next_check_time.strftime('%H:%M')} ({sleep_seconds/60:.1f}分鐘後)")
+            
+            # 等待到檢查時間
+            await asyncio.sleep(sleep_seconds)
+            
+            # 執行匯率檢查
+            await perform_rate_check()
+            
+        except asyncio.CancelledError:
+            logger.info("🔄 匯率檢查任務已被取消")
+            break
+        except Exception as e:
+            logger.error(f"匯率檢查任務異常: {e}")
+            # 等待10分鐘後重試
+            await asyncio.sleep(600)
+
+async def perform_rate_check():
+    """執行匯率檢查和通知"""
     # 檢查所有有設定通知頻道的伺服器
     servers_with_channels = data_manager.get_all_servers_with_channels()
     
@@ -1108,6 +1141,7 @@ async def check_exchange_rate():
         logger.info(f"📈 獲取匯率成功: {rate:.4f} (將通知 {len(servers_with_channels)} 個伺服器)")
         
         # 🔄 處理所有伺服器的通知邏輯
+        now = datetime.now()
         for server_info in servers_with_channels:
             guild_id = server_info['guild_id']
             channel_id = server_info['channel_id']
@@ -1178,55 +1212,67 @@ async def check_exchange_rate():
     except Exception as e:
         logger.error(f"❌ 檢查匯率時發生全域錯誤: {e}")
 
-@tasks.loop(hours=24)  # 每24小時（每天）自動備份
-async def auto_backup():
-    """自動備份任務 - 每天執行一次"""
-    try:
-        backup_path = backup_manager.create_backup()
-        
-        if backup_path:
-            logger.info(f"✅ 每日自動備份完成: {os.path.basename(backup_path)}")
+async def schedule_health_check():
+    """每小時15分和45分執行健康檢查"""
+    while True:
+        try:
+            # 計算到下一個15分或45分的時間
+            now = datetime.now()
+            next_check_time = None
             
-            # 智能清理舊備份（已在create_backup中執行）
-            logger.info("� 備份清理策略：7天內保留所有，超過7天只保留星期一備份")
-        else:
-            logger.error("❌ 每日自動備份失敗")
-    except Exception as e:
-        logger.error(f"自動備份任務異常: {e}")
+            if now.minute < 15:
+                # 到15分
+                next_check_time = now.replace(minute=15, second=0, microsecond=0)
+            elif now.minute < 45:
+                # 到45分
+                next_check_time = now.replace(minute=45, second=0, microsecond=0)
+            else:
+                # 到下一個小時的15分
+                next_check_time = now.replace(minute=15, second=0, microsecond=0) + timedelta(hours=1)
+            
+            sleep_seconds = (next_check_time - now).total_seconds()
+            
+            logger.info(f"⏰ 下次健康檢查時間: {next_check_time.strftime('%H:%M')} ({sleep_seconds/60:.1f}分鐘後)")
+            
+            # 等待到檢查時間
+            await asyncio.sleep(sleep_seconds)
+            
+            # 執行健康檢查
+            await perform_health_check()
+            
+        except asyncio.CancelledError:
+            logger.info("🔄 健康檢查任務已被取消")
+            break
+        except Exception as e:
+            logger.error(f"健康檢查任務異常: {e}")
+            # 等待10分鐘後重試
+            await asyncio.sleep(600)
 
-@tasks.loop(minutes=15)  # 每15分鐘執行一次健康檢查
-async def health_monitoring_task():
-    """定期健康監控任務 - 包含數據持久化"""
+async def perform_health_check():
+    """執行健康檢查（使用快速檢查以提高效率）"""
     try:
-        # 使用系統管理器執行綜合健康檢查（自動保存到 server_data.json）
         if system_manager:
-            comprehensive_report = await system_manager.get_comprehensive_system_report()
+            # 使用快速健康檢查以提高效率
+            health_report = await system_manager.health_monitor.quick_health_check()
             
             # 記錄系統狀態
-            overall_status = comprehensive_report.get('overall_status', 'unknown')
+            overall_status = health_report.get('status', 'unknown')
             if overall_status != 'healthy':
                 logger.warning(f"⚠️ 系統健康狀態: {overall_status}")
                 
-                # 如果狀態嚴重，執行自動維護
-                if overall_status == 'critical':
-                    logger.error(f"❌ 系統處於嚴重狀態，啟動自動維護程序")
-                    maintenance_result = await system_manager.perform_system_maintenance()
+                # 如果狀態嚴重，執行詳細檢查
+                if overall_status == 'error':
+                    logger.warning("🔍 執行詳細健康檢查...")
+                    detailed_report = await system_manager.health_monitor.comprehensive_health_check()
+                    logger.error(f"❌ 系統健康檢查發現問題: {detailed_report.get('errors', [])}")
                     
-                    if maintenance_result.get('recovery_attempted'):
-                        logger.info(f"🔄 自動恢復已啟動: {maintenance_result.get('recovery_actions', [])}")
-            else:
-                logger.info(f"✅ 系統健康狀態正常 - 已保存檢查記錄")
-        else:
-            # 備援：使用原有的健康監控器
-            if system_manager:
-                health_report = await system_manager.health_monitor.quick_health_check()
-                
-                if health_report['status'] != 'healthy':
-                    logger.warning(f"⚠️ 系統健康狀態: {health_report['status']}")
-                    
-                    if health_report['status'] == 'error':
-                        detailed_report = await system_manager.health_monitor.comprehensive_health_check()
-                        logger.error(f"❌ 系統健康檢查發現問題: {detailed_report.get('errors', [])}")
+                    # 如果狀態嚴重，啟動自動維護
+                    if detailed_report.get('overall_status') == 'critical':
+                        logger.error(f"❌ 系統處於嚴重狀態，啟動自動維護程序")
+                        maintenance_result = await system_manager.perform_system_maintenance()
+                        
+                        if maintenance_result.get('recovery_attempted'):
+                            logger.info(f"🔄 自動恢復已啟動: {maintenance_result.get('recovery_actions', [])}")
                 
                 # 檢查是否需要自動重啟
                 if system_manager.health_monitor.consecutive_failures >= 3:
@@ -1235,21 +1281,86 @@ async def health_monitoring_task():
                     if restart_attempted:
                         logger.info("🔄 已啟動自動重啟程序")
             else:
-                logger.warning("⚠️ 系統管理器未初始化，跳過健康檢查")
+                logger.info(f"✅ 系統健康狀態正常")
+        else:
+            logger.warning("⚠️ 系統管理器未初始化，跳過健康檢查")
                 
     except Exception as e:
-        logger.error(f"健康監控任務異常: {e}")
+        logger.error(f"健康檢查異常: {e}")
 
-@tasks.loop(hours=24)  # 每24小時執行一次運維任務（凌晨執行）
-async def daily_maintenance_task():
-    """每日自動運維任務"""
-    try:
-        # 在凌晨2點執行維護任務，避開高峰時段
-        now = datetime.now()
-        if now.hour == 2:
+async def schedule_daily_backup():
+    """每天0:00執行備份任務"""
+    while True:
+        try:
+            # 計算到下一個0:00的時間
+            now = datetime.now()
+            tomorrow = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+            sleep_seconds = (tomorrow - now).total_seconds()
+            
+            logger.info(f"⏰ 下次備份時間: {tomorrow.strftime('%Y-%m-%d %H:%M:%S')} ({sleep_seconds/3600:.1f}小時後)")
+            
+            # 等待到0:00
+            await asyncio.sleep(sleep_seconds)
+            
+            # 執行備份
+            logger.info("🔄 開始執行每日0:00自動備份...")
+            backup_path = backup_manager.create_backup()
+            
+            if backup_path:
+                logger.info(f"✅ 每日自動備份完成: {os.path.basename(backup_path)}")
+                logger.info("📦 備份清理策略：7天內保留所有，超過7天只保留星期一備份")
+            else:
+                logger.error("❌ 每日自動備份失敗")
+                
+        except Exception as e:
+            logger.error(f"每日備份任務異常: {e}")
+            # 等待1小時後重試
+            await asyncio.sleep(3600)
+
+
+async def schedule_daily_maintenance():
+    """每天凌晨2:00執行維護任務"""
+    while True:
+        try:
+            # 計算到下午2:00的時間
+            now = datetime.now()
+            target_time = now.replace(hour=2, minute=0, second=0, microsecond=0)
+            
+            # 如果現在已經過了今天的2:00，設定為明天的2:00
+            if now.hour >= 2:
+                target_time += timedelta(days=1)
+            
+            sleep_seconds = (target_time - now).total_seconds()
+            
+            logger.info(f"⏰ 下次維護時間: {target_time.strftime('%Y-%m-%d %H:%M:%S')} ({sleep_seconds/3600:.1f}小時後)")
+            
+            # 等待到2:00
+            await asyncio.sleep(sleep_seconds)
+            
+            # 執行維護任務
             logger.info("🔧 開始執行每日自動運維任務...")
             
             if system_manager:
+                # 1. 執行詳細的健康檢查
+                logger.info("🏥 執行維護前詳細健康檢查...")
+                try:
+                    detailed_health_report = await system_manager.health_monitor.comprehensive_health_check()
+                    health_status = detailed_health_report.get('overall_status', 'unknown')
+                    logger.info(f"📊 系統健康狀態: {health_status}")
+                    
+                    if health_status != 'healthy':
+                        logger.warning(f"⚠️ 發現系統健康問題，將在維護中處理")
+                        if detailed_health_report.get('errors'):
+                            logger.error(f"❌ 健康檢查錯誤: {detailed_health_report['errors'][:3]}")
+                        if detailed_health_report.get('warnings'):
+                            logger.warning(f"⚠️ 健康檢查警告: {detailed_health_report['warnings'][:3]}")
+                    else:
+                        logger.info("✅ 系統健康狀態良好")
+                        
+                except Exception as e:
+                    logger.error(f"❌ 詳細健康檢查失敗: {e}")
+                
+                # 2. 執行日常維護任務
                 maintenance_report = await system_manager.auto_maintenance.run_daily_maintenance()
                 
                 # 記錄維護結果
@@ -1262,11 +1373,80 @@ async def daily_maintenance_task():
                 # 如果有失敗的任務，記錄詳細信息
                 if failed_tasks > 0:
                     logger.warning(f"⚠️ 運維任務失敗項目: {maintenance_report.get('tasks_failed', [])}")
+                
+                # 3. 維護完成後重新調度任務，確保時間同步準確性
+                logger.info("🔄 重新調度定期任務以確保時間同步...")
+                try:
+                    global rate_check_task, health_check_task
+                    
+                    # 取消現有任務
+                    if rate_check_task and not rate_check_task.cancelled():
+                        rate_check_task.cancel()
+                        logger.info("🔄 已取消舊的匯率檢查任務")
+                    
+                    if health_check_task and not health_check_task.cancelled():
+                        health_check_task.cancel()
+                        logger.info("🔄 已取消舊的健康檢查任務")
+                    
+                    # 等待短暫時間確保任務完全取消
+                    await asyncio.sleep(1)
+                    
+                    # 重新啟動匯率檢查任務
+                    rate_check_task = asyncio.create_task(schedule_rate_check())
+                    logger.info("✅ 匯率檢查任務已重新調度")
+                    
+                    # 重新啟動健康檢查任務
+                    health_check_task = asyncio.create_task(schedule_health_check())
+                    logger.info("✅ 健康檢查任務已重新調度")
+                    
+                    # 計算下次檢查時間並記錄
+                    now = datetime.now()
+                    
+                    # 下次匯率檢查時間
+                    if now.minute < 30:
+                        next_rate_check = now.replace(minute=30, second=0, microsecond=0)
+                    else:
+                        next_rate_check = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+                    
+                    # 下次健康檢查時間
+                    if now.minute < 15:
+                        next_health_check = now.replace(minute=15, second=0, microsecond=0)
+                    elif now.minute < 45:
+                        next_health_check = now.replace(minute=45, second=0, microsecond=0)
+                    else:
+                        next_health_check = now.replace(minute=15, second=0, microsecond=0) + timedelta(hours=1)
+                    
+                    logger.info(f"📅 下次匯率檢查: {next_rate_check.strftime('%H:%M')}")
+                    logger.info(f"📅 下次健康檢查: {next_health_check.strftime('%H:%M')}")
+                    
+                except Exception as e:
+                    logger.error(f"❌ 重新調度任務失敗: {e}")
+                
+                # 4. 執行維護後的健康檢查驗證
+                logger.info("🔍 執行維護後健康檢查驗證...")
+                try:
+                    post_maintenance_health = await system_manager.health_monitor.quick_health_check()
+                    post_health_status = post_maintenance_health.get('status', 'unknown')
+                    logger.info(f"📋 維護後系統狀態: {post_health_status}")
+                    
+                    if post_health_status == 'healthy':
+                        logger.info("✅ 維護後系統狀態良好")
+                    else:
+                        logger.warning(f"⚠️ 維護後系統仍有問題: {post_health_status}")
+                        
+                except Exception as e:
+                    logger.error(f"❌ 維護後健康檢查失敗: {e}")
+                
+                # 記錄維護完成後的狀態
+                logger.info("⚙️ 每日維護任務已完成，系統繼續監控中...")
+                
             else:
                 logger.warning("⚠️ 系統管理器未初始化，跳過每日維護")
                 
-    except Exception as e:
-        logger.error(f"每日運維任務異常: {e}")
+        except Exception as e:
+            logger.error(f"每日運維任務異常: {e}")
+            # 等待1小時後重試
+            await asyncio.sleep(3600)
 
 # ====== 錯誤處理 ======
 
