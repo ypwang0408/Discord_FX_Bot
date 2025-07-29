@@ -67,18 +67,13 @@ class ServerDataManager:
                         f.write(',')
                     f.write('\n')
                 
-                # 寫入健康檢查歷史（緊湊格式）
+                # 寫入健康檢查歷史（新的簡化結構）
                 if health_check_history:
-                    f.write('  "health_check_history": {\n')
-                    date_items = list(health_check_history.items())
-                    for i, (date, records) in enumerate(date_items):
-                        # 整個記錄陣列在同一行
-                        records_str = json.dumps(records, separators=(',', ':'))
-                        f.write(f'    "{date}": {records_str}')
-                        if i < len(date_items) - 1:
-                            f.write(',')
-                        f.write('\n')
-                    f.write('  }')
+                    f.write('  "health_check_history": ')
+                    formatted_history = json.dumps(health_check_history, indent=2, ensure_ascii=False)
+                    # 調整縮進
+                    formatted_history = '\n'.join('  ' + line for line in formatted_history.split('\n'))
+                    f.write(formatted_history)
                     if rate_history:
                         f.write(',')
                     f.write('\n')
@@ -267,90 +262,118 @@ class ServerDataManager:
                 })
         return servers_with_channels
     
-    def add_health_check_record(self, health_report):
-        """添加健康檢查記錄"""
+    def add_health_check_record(self, health_report, check_type='quick'):
+        """添加健康檢查記錄 - 簡化結構版本"""
         try:
             now = datetime.now()
-            date_key = now.strftime("%Y-%m-%d")
-            time_key = now.strftime("%H:%M")
+            # 只精準到分鐘
+            timestamp = now.strftime("%Y-%m-%dT%H:%M")
+            status = health_report.get('status', 'unknown')
             
-            # 確保健康檢查歷史結構存在
+            # 初始化新的簡化結構
             if 'health_check_history' not in self.data:
-                self.data['health_check_history'] = {}
+                self.data['health_check_history'] = {
+                    'last_quick_check': None,
+                    'last_detailed_check': None,
+                    'problem_history': []
+                }
             
-            # 確保當天的記錄存在
-            if date_key not in self.data['health_check_history']:
-                self.data['health_check_history'][date_key] = []
+            # 如果是舊格式，直接清空重新開始
+            if not isinstance(self.data['health_check_history'], dict) or 'last_quick_check' not in self.data['health_check_history']:
+                self.data['health_check_history'] = {
+                    'last_quick_check': None,
+                    'last_detailed_check': None,
+                    'problem_history': []
+                }
             
-            # 創建健康檢查記錄
-            health_record = {
-                'timestamp': now.isoformat(),
-                'time': time_key,
-                'status': health_report.get('status', 'unknown'),
-                'checks_total': len(health_report.get('checks', {})),
-                'checks_healthy': sum(1 for check in health_report.get('checks', {}).values() 
-                                    if isinstance(check, dict) and check.get('status') == 'healthy'),
-                'warnings': len(health_report.get('warnings', [])),
-                'errors': len(health_report.get('errors', []))
-            }
+            # 更新對應的檢查時間和狀態
+            if check_type == 'quick':
+                self.data['health_check_history']['last_quick_check'] = {
+                    'timestamp': timestamp,
+                    'status': status
+                }
+            elif check_type == 'detailed':
+                self.data['health_check_history']['last_detailed_check'] = {
+                    'timestamp': timestamp,
+                    'status': status
+                }
             
-            # 添加記錄
-            self.data['health_check_history'][date_key].append([
-                time_key,
-                health_record['status'],
-                health_record['checks_total'],
-                health_record['checks_healthy'],
-                health_record['warnings'],
-                health_record['errors']
-            ])
-            
-            # 保持最近30天的記錄
-            cutoff_date = now - timedelta(days=30)
-            dates_to_remove = []
-            
-            for date_str in self.data['health_check_history']:
-                try:
-                    date_obj = datetime.strptime(date_str, "%Y-%m-%d")
-                    if date_obj < cutoff_date:
-                        dates_to_remove.append(date_str)
-                except ValueError:
-                    continue
-            
-            for date_str in dates_to_remove:
-                del self.data['health_check_history'][date_str]
+            # 如果有問題，添加到問題歷史
+            if status != 'healthy':
+                problem_record = {
+                    'timestamp': timestamp,
+                    'check_type': check_type,
+                    'status': status,
+                    'warnings': health_report.get('warnings', []),
+                    'errors': health_report.get('errors', [])
+                }
+                self.data['health_check_history']['problem_history'].append(problem_record)
             
             self.save_data()
-            logger.debug(f"健康檢查記錄已保存: {health_record['status']}")
+            logger.debug(f"健康檢查記錄已保存: {status} ({check_type})")
             
         except Exception as e:
             logger.error(f"保存健康檢查記錄失敗: {e}")
     
     def get_health_check_history(self, days=7):
-        """獲取健康檢查歷史"""
+        """獲取健康檢查歷史 - 新的簡化結構"""
         try:
             if 'health_check_history' not in self.data:
-                return {}
+                return {
+                    'last_quick_check': None,
+                    'last_detailed_check': None,
+                    'problem_history': []
+                }
             
-            if days is None:
-                return self.data['health_check_history']
+            # 如果是舊格式，直接返回空的新格式
+            if not isinstance(self.data['health_check_history'], dict) or 'last_quick_check' not in self.data['health_check_history']:
+                return {
+                    'last_quick_check': None,
+                    'last_detailed_check': None,
+                    'problem_history': []
+                }
             
-            # 獲取指定天數的記錄
-            cutoff_date = datetime.now() - timedelta(days=days)
-            filtered_history = {}
-            
-            for date_str, records in self.data['health_check_history'].items():
-                try:
-                    date_obj = datetime.strptime(date_str, "%Y-%m-%d")
-                    if date_obj >= cutoff_date:
-                        filtered_history[date_str] = records
-                except ValueError:
-                    continue
-            
-            return filtered_history
+            # 返回新格式資料
+            return self.data['health_check_history']
             
         except Exception as e:
             logger.error(f"獲取健康檢查歷史失敗: {e}")
-            return {}
+            return {
+                'last_quick_check': None,
+                'last_detailed_check': None,
+                'problem_history': []
+            }
+    
+    def cleanup_health_check_problems(self, days=7):
+        """清理超過指定天數的問題記錄（用於維護任務）"""
+        try:
+            if ('health_check_history' not in self.data or 
+                not isinstance(self.data['health_check_history'], dict) or
+                'problem_history' not in self.data['health_check_history']):
+                return 0
+            
+            original_count = len(self.data['health_check_history']['problem_history'])
+            
+            # 清理超過指定天數的問題記錄
+            cutoff_date = datetime.now() - timedelta(days=days)
+            cutoff_str = cutoff_date.strftime("%Y-%m-%dT%H:%M")
+            
+            self.data['health_check_history']['problem_history'] = [
+                record for record in self.data['health_check_history']['problem_history']
+                if record.get('timestamp', '') > cutoff_str
+            ]
+            
+            cleaned_count = original_count - len(self.data['health_check_history']['problem_history'])
+            
+            if cleaned_count > 0:
+                self.save_data()
+                logger.info(f"清理了 {cleaned_count} 個超過 {days} 天的問題記錄")
+            
+            return cleaned_count
+            
+        except Exception as e:
+            logger.error(f"清理健康檢查問題記錄失敗: {e}")
+            return 0
     
     def get_all_servers_with_channels(self):
         """獲取所有設定了通知頻道的伺服器"""

@@ -852,6 +852,18 @@ async def health_slash(interaction: discord.Interaction, quick: bool = False):
     if quick:
         await interaction.response.send_message("⚡ 執行快速健康檢查... / Performing quick health check...")
         health_report = await system_manager.health_monitor.quick_health_check()
+        
+        # 💾 保存快速健康檢查結果到持久化存儲
+        if health_report and health_report.get('status'):
+            formatted_report = {
+                'overall_status': health_report.get('status'),
+                'details': health_report.get('checks', {}),
+                'timestamp': health_report.get('timestamp'),
+                'warnings': health_report.get('warnings', []),
+                'errors': health_report.get('errors', [])
+            }
+            await system_manager._save_health_check_result(formatted_report, 'quick')
+        
         title = "⚡ 快速健康檢查 / Quick Health Check"
         
         embed = discord.Embed(
@@ -899,6 +911,17 @@ async def health_slash(interaction: discord.Interaction, quick: bool = False):
     try:
         # 獲取詳細的健康報告
         health_report = await system_manager.health_monitor.comprehensive_health_check()
+        
+        # 💾 保存詳細健康檢查結果到持久化存儲
+        if health_report and health_report.get('overall_status'):
+            formatted_report = {
+                'overall_status': health_report.get('overall_status'),
+                'details': health_report.get('checks', {}),
+                'timestamp': health_report.get('timestamp'),
+                'warnings': health_report.get('warnings', []),
+                'errors': health_report.get('errors', [])
+            }
+            await system_manager._save_health_check_result(formatted_report, 'detailed')
         
         embed = discord.Embed(
             title="🏥 系統健康詳細分析 / Detailed Health Analysis",
@@ -1254,6 +1277,16 @@ async def perform_health_check():
         if system_manager:
             # 使用快速健康檢查以提高效率
             health_report = await system_manager.health_monitor.quick_health_check()
+            
+            # 💾 保存快速健康檢查結果
+            if health_report and health_report.get('status'):
+                # 轉換格式以符合 system_manager 的期望
+                formatted_report = {
+                    'overall_status': health_report.get('status'),
+                    'details': health_report.get('checks', {}),
+                    'timestamp': health_report.get('timestamp')
+                }
+                await system_manager._save_health_check_result(formatted_report, 'quick')
             
             # 記錄系統狀態
             overall_status = health_report.get('status', 'unknown')

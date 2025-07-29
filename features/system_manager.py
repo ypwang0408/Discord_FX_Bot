@@ -50,7 +50,7 @@ class SystemManager:
             
             # 🔄 儲存健康檢查結果到持久化存儲
             if health_report and 'overall_status' in health_report:
-                await self._save_health_check_result(health_report)
+                await self._save_health_check_result(health_report, 'detailed')
             
             # 整合報告
             integrated_report = {
@@ -282,7 +282,7 @@ class SystemManager:
         except:
             return 0.0
     
-    async def _save_health_check_result(self, health_report: Dict):
+    async def _save_health_check_result(self, health_report: Dict, check_type: str = 'quick'):
         """保存健康檢查結果到持久化存儲"""
         try:
             # 轉換健康報告格式以符合 data_manager 的期望
@@ -304,10 +304,10 @@ class SystemManager:
                     elif status == 'critical':
                         formatted_report['errors'].append(f"{check_name}: {message}")
             
-            # 使用 data_manager 保存健康檢查記錄
-            self.data_manager.add_health_check_record(formatted_report)
+            # 使用 data_manager 保存健康檢查記錄，指定檢查類型
+            self.data_manager.add_health_check_record(formatted_report, check_type)
             
-            logger.info(f"✅ 健康檢查結果已保存: {health_report.get('overall_status')}")
+            logger.info(f"✅ {check_type} 健康檢查結果已保存: {health_report.get('overall_status')}")
             
         except Exception as e:
             logger.error(f"❌ 保存健康檢查結果時發生錯誤: {e}")

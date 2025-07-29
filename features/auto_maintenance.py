@@ -87,10 +87,13 @@ class AutoMaintenance:
             if self.health_monitor:
                 await self._maintain_health_history(maintenance_report)
             
-            # 6. 檢查磁碟空間
+            # 6. 清理健康檢查問題歷史
+            await self._cleanup_health_problems(maintenance_report)
+            
+            # 7. 檢查磁碟空間
             await self._check_disk_space(maintenance_report)
             
-            # 7. 生成維護報告
+            # 8. 生成維護報告
             await self._generate_maintenance_metrics(maintenance_report)
             
             # 記錄維護日誌
@@ -412,6 +415,21 @@ class AutoMaintenance:
         except Exception as e:
             logger.error(f"健康歷史維護失敗: {e}")
             report['tasks_failed'].append(f"健康歷史維護失敗: {str(e)}")
+    
+    async def _cleanup_health_problems(self, report: Dict):
+        """清理健康檢查問題歷史"""
+        try:
+            cleaned_count = self.data_manager.cleanup_health_check_problems(days=7)
+            
+            report['tasks_completed'].append({
+                'task': 'health_problems_cleanup',
+                'cleaned_records': cleaned_count,
+                'retention_days': 7
+            })
+            
+        except Exception as e:
+            logger.error(f"健康問題歷史清理失敗: {e}")
+            report['tasks_failed'].append(f"健康問題歷史清理失敗: {str(e)}")
     
     async def _check_disk_space(self, report: Dict):
         """檢查磁碟空間"""
