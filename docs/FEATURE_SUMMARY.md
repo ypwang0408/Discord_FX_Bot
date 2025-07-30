@@ -95,7 +95,14 @@ features/
       "2024-07-27": [0.205, 0.208, 0.210]
     }
   },
-  "health_check_history": { // 健康檢查記錄 :new:
+  "health_check_history": { // 健康檢查記錄 :new: (簡化結構)
+    "last_quick_check": {     // 上次快速檢查（永不自動清除）
+      "timestamp": "2025-07-29T16:45",
+      "status": "healthy"
+    },
+    "last_detailed_check": null, // 上次詳細檢查（永不自動清除）
+    "problem_history": []     // 問題時間點記錄（每日維護時清理7天前）
+  }
 
 ## ⚡ 最新優化
 

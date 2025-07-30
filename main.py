@@ -1381,6 +1381,18 @@ async def schedule_daily_maintenance():
                     health_status = detailed_health_report.get('overall_status', 'unknown')
                     logger.info(f"📊 系統健康狀態: {health_status}")
                     
+                    # 💾 保存詳細健康檢查結果到持久化存儲
+                    if detailed_health_report and detailed_health_report.get('overall_status'):
+                        formatted_report = {
+                            'overall_status': detailed_health_report.get('overall_status'),
+                            'details': detailed_health_report.get('checks', {}),
+                            'timestamp': detailed_health_report.get('timestamp'),
+                            'warnings': detailed_health_report.get('warnings', []),
+                            'errors': detailed_health_report.get('errors', [])
+                        }
+                        await system_manager._save_health_check_result(formatted_report, 'detailed')
+                        logger.info("✅ 詳細健康檢查結果已保存")
+                    
                     if health_status != 'healthy':
                         logger.warning(f"⚠️ 發現系統健康問題，將在維護中處理")
                         if detailed_health_report.get('errors'):

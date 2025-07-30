@@ -271,8 +271,23 @@ import json
 with open('server_data.json', 'r') as f:
     data = json.load(f)
 if 'health_check_history' in data:
-    total_records = sum(len(records) for records in data['health_check_history'].values())
-    print(f'健康檢查記錄數量: {total_records}')
+    history = data['health_check_history']
+    if isinstance(history, dict) and 'last_quick_check' in history:
+        # 新格式（簡化結構）
+        print(f'上次快速檢查: {history.get("last_quick_check")}')
+        print(f'上次詳細檢查: {history.get("last_detailed_check")}')
+        print(f'問題記錄數量: {len(history.get("problem_history", []))}')
+        
+        # 顯示最近的問題
+        problems = history.get("problem_history", [])
+        if problems:
+            print("最近問題:")
+            for p in problems[-3:]:  # 顯示最近3個問題
+                print(f"  {p.get('timestamp')} - {p.get('status')} ({p.get('check_type')})")
+    else:
+        # 舊格式（已棄用）
+        total_records = sum(len(records) for records in history.values())
+        print(f'健康檢查記錄數量: {total_records}')
 else:
     print('⚠️  健康檢查記錄不存在')
 "
