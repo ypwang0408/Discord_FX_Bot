@@ -154,7 +154,8 @@ class ExchangeRateMonitor:
         async with self as monitor:
             try:
                 return await monitor.get_backup_jpy_rate_with_session()
-            except:
+            except Exception as e:
+                logger.error(f"備用 API 匯率獲取失敗: {e}")
                 return None
     
     async def get_rate_with_fallback(self):

@@ -249,7 +249,8 @@ class AutoMaintenance:
                     # 檢查並清理無效的伺服器記錄
                     servers_to_remove = []
                     for server_id, server_data in original_data.items():
-                        if server_id == 'rate_history':
+                        # 跳過系統記錄欄位
+                        if server_id in ['rate_history', 'health_check_history']:
                             continue
                         
                         if isinstance(server_data, dict):
@@ -651,8 +652,9 @@ echo "重啟完成"
                     try:
                         os.remove(log_file)
                         cleanup_report['actions_taken'].append(f"刪除日誌: {log_file}")
-                    except:
-                        pass
+                    except (OSError, PermissionError) as e:
+                        logger.warning(f"無法刪除日誌檔案 {log_file}: {e}")
+                        cleanup_report['actions_taken'].append(f"刪除日誌失敗: {log_file} - {e}")
             
             # 2. 清理超過3天的備份
             backup_dir = "backups"
@@ -666,8 +668,9 @@ echo "重啟完成"
                             if file_date < cutoff_date:
                                 os.remove(os.path.join(backup_dir, backup_file))
                                 cleanup_report['actions_taken'].append(f"刪除舊備份: {backup_file}")
-                        except:
-                            pass
+                        except (ValueError, OSError, PermissionError) as e:
+                            logger.warning(f"無法處理備份檔案 {backup_file}: {e}")
+                            cleanup_report['actions_taken'].append(f"處理備份失敗: {backup_file} - {e}")
             
             # 3. 壓縮數據文件
             if os.path.exists(self.data_manager.data_file):

@@ -58,8 +58,37 @@ except Exception as e:
     system_manager = None
 
 # 全域任務追蹤器
-rate_check_task = None
-health_check_task = None
+# 任務管理器類，替代全域變數避免競態條件
+class TaskManager:
+    def __init__(self):
+        self.rate_check_task = None
+        self.health_check_task = None
+    
+    async def cancel_all_tasks(self):
+        """安全地取消所有任務"""
+        if self.rate_check_task and not self.rate_check_task.done():
+            self.rate_check_task.cancel()
+            try:
+                await self.rate_check_task
+            except asyncio.CancelledError:
+                pass
+        
+        if self.health_check_task and not self.health_check_task.done():
+            self.health_check_task.cancel()
+            try:
+                await self.health_check_task
+            except asyncio.CancelledError:
+                pass
+    
+    async def start_tasks(self):
+        """啟動所有定期任務"""
+        await self.cancel_all_tasks()
+        self.rate_check_task = asyncio.create_task(schedule_rate_check())
+        self.health_check_task = asyncio.create_task(schedule_health_check())
+        logger.info("✅ 定期任務已啟動")
+
+# 全域任務管理器實例
+task_manager = TaskManager()
 
 # ====== Bot 事件 ======
 
@@ -80,12 +109,11 @@ async def on_ready():
         print("提示：確保機器人有 'applications.commands' 權限")
     
     # 啟動匯率檢查任務（每小時整點和30分）
-    global rate_check_task, health_check_task
-    rate_check_task = asyncio.create_task(schedule_rate_check())
+    task_manager.rate_check_task = asyncio.create_task(schedule_rate_check())
     print("✅ 匯率檢查任務已啟動（每小時整點和30分）")
     
     # 啟動健康檢查任務（每小時15分和45分）
-    health_check_task = asyncio.create_task(schedule_health_check())
+    task_manager.health_check_task = asyncio.create_task(schedule_health_check())
     print("✅ 健康檢查任務已啟動（每小時15分和45分）")
     
     # 啟動每日0:00自動備份任務
@@ -156,6 +184,7 @@ async def rate_slash(interaction: discord.Interaction):
         await interaction.followup.send("❌ 無法獲取匯率資訊，請稍後再試。/ Cannot get exchange rate, please try again later.")
 
 @bot.tree.command(name="threshold", description="設定匯率監控閾值 / Set exchange rate monitoring threshold")
+@app_commands.describe(threshold="監控閾值 (0.1-1.0) / Monitoring threshold (0.1-1.0)")
 async def threshold_slash(interaction: discord.Interaction, threshold: float):
     """設定匯率監控閾值"""
     if not interaction.guild:
@@ -184,6 +213,7 @@ async def channel_slash(interaction: discord.Interaction):
     await interaction.response.send_message(f"✅ 已設定通知頻道為: **{interaction.channel.name}** / Notification channel set to: **{interaction.channel.name}**")
 
 @bot.tree.command(name="mention", description="設定是否使用@everyone通知 / Set @everyone mention notifications")
+@app_commands.describe(enable="是否啟用@everyone通知 / Whether to enable @everyone mentions")
 async def mention_slash(interaction: discord.Interaction, enable: bool):
     """設定是否使用@everyone通知"""
     if not interaction.guild:
@@ -238,7 +268,8 @@ async def status_slash(interaction: discord.Interaction):
         try:
             rate_time = datetime.fromisoformat(last_rate_time)
             rate_display = f"{last_rate:.4f} JPY/TWD ({rate_time.strftime('%m-%d %H:%M')})"
-        except:
+        except (ValueError, TypeError) as e:
+            logger.warning(f"解析匯率時間失敗: {e}, last_rate_time: {last_rate_time}")
             rate_display = f"{last_rate:.4f} JPY/TWD" if last_rate else "無 / None"
     else:
         rate_display = f"{last_rate:.4f} JPY/TWD" if last_rate else "無 / None"
@@ -274,8 +305,13 @@ async def status_slash(interaction: discord.Interaction):
                 value=f"{notification_time.strftime('%Y-%m-%d %H:%M:%S')}",
                 inline=False
             )
-        except:
-            pass
+        except (ValueError, TypeError) as e:
+            logger.warning(f"解析通知時間失敗: {e}, last_notification: {last_notification}")
+            embed.add_field(
+                name="最後通知時間 / Last Notification",
+                value="時間格式錯誤 / Invalid time format",
+                inline=False
+            )
     
     embed.add_field(
         name="@everyone 通知 / @everyone Mention",
@@ -286,6 +322,7 @@ async def status_slash(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="chart", description="生成匯率趨勢圖表 / Generate rate trend chart")
+@app_commands.describe(days="天數範圍 (1-30天) / Days range (1-30 days)")
 async def chart_slash(interaction: discord.Interaction, days: int = 7):
     """生成匯率圖表"""
     if not interaction.guild:
@@ -625,7 +662,12 @@ async def sync_slash(interaction: discord.Interaction):
         await interaction.followup.send(embed=embed)
 
 @bot.tree.command(name="system", description="檢查系統運行狀態和API可用性 / Check system status and API availability")
-async def system_slash(interaction: discord.Interaction, detailed: bool = False):
+@app_commands.describe(mode="檢查模式 / Check mode")
+@app_commands.choices(mode=[
+    app_commands.Choice(name="快速檢查 / Quick Check", value="quick"),
+    app_commands.Choice(name="詳細檢查 / Detailed Check", value="detailed")
+])
+async def system_slash(interaction: discord.Interaction, mode: str = "quick"):
     """全面的系統狀態檢查（整合版）"""
     # 檢查用戶是否為管理員
     if not interaction.user.guild_permissions.administrator:
@@ -637,7 +679,7 @@ async def system_slash(interaction: discord.Interaction, detailed: bool = False)
         await interaction.response.send_message("❌ 系統管理器未正確初始化，請重啟機器人")
         return
     
-    if detailed:
+    if mode == "detailed":
         await interaction.response.send_message("🔍 正在執行詳細系統檢查... / Performing detailed system check...")
         try:
             system_report = await system_manager.get_comprehensive_system_report()
@@ -706,7 +748,7 @@ async def system_slash(interaction: discord.Interaction, detailed: bool = False)
         inline=False
     )
     
-    if detailed:
+    if mode == "detailed":
         # 詳細報告模式
         quick_stats = system_report.get('quick_stats', {})
         
@@ -800,7 +842,7 @@ async def system_slash(interaction: discord.Interaction, detailed: bool = False)
         name="🤖 Bot資訊 / Bot Info",
         value=f"名稱 / Name: {bot.user.name}\n"
               f"延遲 / Latency: {round(bot.latency * 1000)}ms\n"
-              f"監控狀態 / Monitor: {'✅ 運行中' if rate_check_task and not rate_check_task.cancelled() else '❌ 已停止'}",
+              f"監控狀態 / Monitor: {'✅ 運行中' if task_manager.rate_check_task and not task_manager.rate_check_task.cancelled() else '❌ 已停止'}",
         inline=False
     )
     
@@ -825,7 +867,7 @@ async def system_slash(interaction: discord.Interaction, detailed: bool = False)
     )
     
     # 操作提示
-    if detailed:
+    if mode == "detailed":
         embed.add_field(name="\u200b", value="\n", inline=False)
         embed.add_field(
             name="🔧 快速操作 / Quick Actions",
@@ -842,164 +884,165 @@ async def system_slash(interaction: discord.Interaction, detailed: bool = False)
 # ====== 系統管理輔助指令 ======
 
 @bot.tree.command(name="health", description="系統健康檢查 / System health check")
-async def health_slash(interaction: discord.Interaction, quick: bool = False):
-    """系統健康檢查"""
+@app_commands.describe(check_type="檢查類型 / Check type")
+@app_commands.choices(check_type=[
+    app_commands.Choice(name="快速檢查 / Quick Check", value="quick"),
+    app_commands.Choice(name="詳細檢查 / Detailed Check", value="detailed")
+])
+async def health_slash(interaction: discord.Interaction, 
+                      check_type: str = "quick"):
+    """
+    系統健康檢查
+    check_type: "quick" 為快速檢查，"detailed" 為詳細檢查
+    """
     # 檢查用戶是否為管理員
     if not interaction.user.guild_permissions.administrator:
         await interaction.response.send_message("❌ 此指令需要管理員權限 / This command requires administrator permission")
         return
     
-    if quick:
+    # 參數驗證
+    if check_type not in ["quick", "detailed"]:
+        await interaction.response.send_message("❌ 檢查類型必須是 'quick' 或 'detailed' / Check type must be 'quick' or 'detailed'")
+        return
+    
+    if check_type == "quick":
         await interaction.response.send_message("⚡ 執行快速健康檢查... / Performing quick health check...")
         health_report = await system_manager.health_monitor.quick_health_check()
+        title = "⚡ 快速健康檢查 / Quick Health Check"
         
         # 💾 保存快速健康檢查結果到持久化存儲
         if health_report and health_report.get('status'):
             formatted_report = {
                 'overall_status': health_report.get('status'),
                 'details': health_report.get('checks', {}),
-                'timestamp': health_report.get('timestamp'),
+                'timestamp': health_report.get('timestamp', datetime.now().isoformat()),
                 'warnings': health_report.get('warnings', []),
                 'errors': health_report.get('errors', [])
             }
             await system_manager._save_health_check_result(formatted_report, 'quick')
-        
-        title = "⚡ 快速健康檢查 / Quick Health Check"
-        
-        embed = discord.Embed(
-            title=title,
-            color=0x00ff00 if health_report.get('status') == 'healthy' else 0xff9900,
-            timestamp=datetime.now()
-        )
-        
-        embed.add_field(
-            name="🎯 整體狀態 / Overall Status",
-            value=f"{'✅' if health_report.get('status') == 'healthy' else '⚠️'} **{health_report.get('status', 'unknown').upper()}**",
-            inline=False
-        )
-        
-        embed.add_field(
-            name="🔍 檢查項目 / Checks Performed",
-            value=f"檢查數量 / Total Checks: {len(health_report.get('checks', {}))}",
-            inline=False
-        )
-        
-        # 檢查結果摘要
-        if health_report.get('checks'):
-            check_summary = []
-            for check_name, check_result in health_report['checks'].items():
-                if isinstance(check_result, dict):
-                    status = check_result.get('status', 'unknown')
-                    status_icon = {"healthy": "✅", "warning": "⚠️", "error": "❌"}.get(status, "❓")
-                    check_summary.append(f"{status_icon} {check_name}")
-                else:
-                    check_summary.append(f"❓ {check_name}")
             
-            embed.add_field(
-                name="📋 檢查結果 / Check Results",
-                value='\n'.join(check_summary),
-                inline=False
-            )
-        
-        embed.set_footer(text="提示：使用 /health 獲取詳細分析")
-        await interaction.followup.send(embed=embed)
-        return
-    
-    # 詳細健康分析
-    await interaction.response.send_message("🏥 正在執行詳細健康分析... / Performing detailed health analysis...")
-    
-    try:
-        # 獲取詳細的健康報告
+    else:  # detailed
+        await interaction.response.send_message("🔍 執行詳細健康檢查... / Performing comprehensive health check...")
         health_report = await system_manager.health_monitor.comprehensive_health_check()
+        title = "🔍 詳細健康檢查 / Comprehensive Health Check"
         
         # 💾 保存詳細健康檢查結果到持久化存儲
         if health_report and health_report.get('overall_status'):
             formatted_report = {
                 'overall_status': health_report.get('overall_status'),
                 'details': health_report.get('checks', {}),
-                'timestamp': health_report.get('timestamp'),
+                'timestamp': health_report.get('timestamp', datetime.now().isoformat()),
                 'warnings': health_report.get('warnings', []),
                 'errors': health_report.get('errors', [])
             }
             await system_manager._save_health_check_result(formatted_report, 'detailed')
+            logger.info("✅ 手動詳細健康檢查已完成並保存")
+            
+            # 🔍 立即驗證保存結果
+            health_history = data_manager.data.get('health_check_history', {})
+            last_detailed = health_history.get('last_detailed_check')
+            if last_detailed and last_detailed.get('timestamp'):
+                logger.info(f"✅ 詳細檢查保存驗證成功: {last_detailed['timestamp']}")
+            else:
+                logger.error("❌ 詳細檢查保存驗證失敗")
+    
+    # 統一的結果顯示
+    color = 0x00ff00 if health_report.get('overall_status', health_report.get('status')) == 'healthy' else 0xff9900
+    if health_report.get('overall_status', health_report.get('status')) == 'error':
+        color = 0xff0000
+    
+    embed = discord.Embed(
+        title=title,
+        color=color,
+        timestamp=datetime.now()
+    )
+    
+    # 狀態欄位
+    status_key = 'overall_status' if check_type == 'detailed' else 'status'
+    status = health_report.get(status_key, 'unknown')
+    status_icons = {"healthy": "✅", "warning": "⚠️", "error": "❌", "unknown": "❓"}
+    
+    embed.add_field(
+        name="🎯 整體狀態 / Overall Status",
+        value=f"{status_icons.get(status, '❓')} **{status.upper()}**",
+        inline=False
+    )
+    
+    embed.add_field(
+        name="🔍 檢查項目 / Checks Performed",
+        value=f"檢查數量 / Total Checks: {len(health_report.get('checks', {}))}",
+        inline=False
+    )
+    
+    # 檢查結果摘要
+    if health_report.get('checks'):
+        check_summary = []
+        for check_name, check_result in health_report['checks'].items():
+            if isinstance(check_result, dict):
+                check_status = check_result.get('status', 'unknown')
+                status_icon = status_icons.get(check_status, "❓")
+                check_summary.append(f"{status_icon} {check_name}")
+            else:
+                check_summary.append(f"❓ {check_name}")
         
-        embed = discord.Embed(
-            title="🏥 系統健康詳細分析 / Detailed Health Analysis",
-            color=0x00ff00 if health_report.get('overall_status') == 'healthy' else 0xff9900,
-            timestamp=datetime.now()
+        embed.add_field(
+            name="📋 檢查結果 / Check Results",
+            value='\n'.join(check_summary[:10]) if check_summary else "無檢查項目 / No checks",
+            inline=False
         )
         
-        # 檢查摘要
-        if 'metrics' in health_report:
-            metrics = health_report['metrics']
+        if len(check_summary) > 10:
+            embed.set_footer(text=f"顯示前10項，共{len(check_summary)}項檢查 / Showing 10 of {len(check_summary)} checks")
+    
+    # 顯示警告和錯誤（僅詳細檢查）
+    if check_type == "detailed":
+        warnings = health_report.get('warnings', [])
+        errors = health_report.get('errors', [])
+        
+        if warnings:
             embed.add_field(
-                name="📊 檢查摘要 / Check Summary",
-                value=f"檢查項目 / Items: {metrics.get('checks_total', 0)}\n"
-                      f"✅ 健康 / Healthy: {metrics.get('checks_healthy', 0)}\n"
-                      f"⚠️ 警告 / Warning: {metrics.get('checks_warning', 0)}\n"
-                      f"❌ 錯誤 / Error: {metrics.get('checks_error', 0)}",
+                name="⚠️ 警告 / Warnings",
+                value='\n'.join(warnings[:5]) + ('\n...' if len(warnings) > 5 else ''),
                 inline=False
             )
         
-        # API健康狀態
-        if 'checks' in health_report and 'api_health' in health_report['checks']:
-            api_info = health_report['checks']['api_health']
-            if isinstance(api_info, dict):
-                api_summary = []
-                for api_name, api_data in api_info.get('apis', {}).items():
-                    status_icon = {"healthy": "✅", "warning": "⚠️", "error": "❌"}.get(api_data.get('status'), "❓")
-                    response_time = api_data.get('response_time_ms', 0)
-                    api_summary.append(f"{status_icon} {api_name}: {response_time:.0f}ms")
-                
-                embed.add_field(
-                    name="🌐 API健康狀態 / API Health",
-                    value='\n'.join(api_summary[:4]) if api_summary else "無API檢查數據",
-                    inline=False
-                )
-        
-        # 資源使用詳情
-        if 'checks' in health_report and 'resource_health' in health_report['checks']:
-            resource_info = health_report['checks']['resource_health']
-            if isinstance(resource_info, dict) and resource_info.get('status') != 'error':
-                memory_info = resource_info.get('memory', {})
-                disk_info = resource_info.get('disk', {})
-                cpu_info = resource_info.get('cpu', {})
-                
-                embed.add_field(
-                    name="💻 系統資源 / System Resources",
-                    value=f"記憶體 / Memory: {memory_info.get('percent', 0):.1f}% ({memory_info.get('used_gb', 0):.1f}GB)\n"
-                          f"磁碟 / Disk: {disk_info.get('percent', 0):.1f}% ({disk_info.get('used_gb', 0):.1f}GB)\n"
-                          f"CPU: {cpu_info.get('percent', 0):.1f}%",
-                    inline=False
-                )
-        
-        # 警告信息
-        if health_report.get('warnings'):
-            warnings_text = '\n'.join([f"• {w}" for w in health_report['warnings'][:5]])
+        if errors:
             embed.add_field(
-                name="⚠️ 系統警告 / System Warnings",
-                value=warnings_text,
+                name="❌ 錯誤 / Errors",
+                value='\n'.join(errors[:5]) + ('\n...' if len(errors) > 5 else ''),
                 inline=False
             )
-        
-        # 錯誤信息
-        if health_report.get('errors'):
-            errors_text = '\n'.join([f"• {e}" for e in health_report['errors'][:3]])
-            embed.add_field(
-                name="❌ 系統錯誤 / System Errors",
-                value=errors_text,
-                inline=False
-            )
-        
-        embed.set_footer(text="提示：使用 /system detailed:True 獲取整合報告")
-        
-        await interaction.followup.send(embed=embed)
-        
-    except Exception as e:
-        logger.error(f"健康分析失敗: {e}")
-        await interaction.followup.send(f"❌ 健康分析失敗: {str(e)}")
+    
+    # 顯示檢查完成時間
+    timestamp = health_report.get('timestamp', datetime.now().isoformat())
+    embed.add_field(
+        name="🕒 檢查時間 / Check Time",
+        value=f"`{timestamp}`",
+        inline=False
+    )
+    
+    # 添加使用提示
+    if check_type == "quick":
+        embed.set_footer(text="提示：使用 /health detailed 獲取詳細分析 / Tip: Use /health detailed for comprehensive analysis")
+    else:
+        # 顯示保存狀態
+        health_history = data_manager.data.get('health_check_history', {})
+        last_detailed = health_history.get('last_detailed_check')
+        if last_detailed and last_detailed.get('timestamp'):
+            embed.set_footer(text=f"✅ 詳細檢查已保存到系統記錄 / Detailed check saved to system records")
+        else:
+            embed.set_footer(text="⚠️ 檢查結果保存可能有問題 / Check result saving may have issues")
+    
+    await interaction.followup.send(embed=embed)
+
 
 @bot.tree.command(name="maintenance", description="系統維護管理 / System maintenance management")
+@app_commands.describe(operation="維護操作類型 / Maintenance operation type")
+@app_commands.choices(operation=[
+    app_commands.Choice(name="維護摘要 / Summary", value="summary"),
+    app_commands.Choice(name="每日維護 / Daily Maintenance", value="daily"),
+    app_commands.Choice(name="緊急清理 / Emergency Cleanup", value="emergency")
+])
 async def maintenance_slash(interaction: discord.Interaction, operation: str = "summary"):
     """系統維護管理"""
     # 檢查用戶是否為管理員
@@ -1392,6 +1435,18 @@ async def schedule_daily_maintenance():
                         }
                         await system_manager._save_health_check_result(formatted_report, 'detailed')
                         logger.info("✅ 詳細健康檢查結果已保存")
+                        
+                        # 🔍 驗證詳細檢查結果是否正確保存
+                        saved_check = data_manager.data.get('health_check_history', {}).get('last_detailed_check')
+                        if saved_check and saved_check.get('timestamp'):
+                            logger.info(f"✅ 確認詳細檢查已記錄: {saved_check['timestamp']}")
+                        else:
+                            logger.warning("⚠️ 詳細檢查保存驗證失敗，將重試...")
+                            # 重試保存
+                            data_manager.record_health_check(formatted_report, 'detailed')
+                            data_manager.save_data()
+                    else:
+                        logger.warning("⚠️ 詳細健康檢查報告無效，無法保存")
                     
                     if health_status != 'healthy':
                         logger.warning(f"⚠️ 發現系統健康問題，將在維護中處理")
@@ -1404,6 +1459,7 @@ async def schedule_daily_maintenance():
                         
                 except Exception as e:
                     logger.error(f"❌ 詳細健康檢查失敗: {e}")
+                    health_status = 'error'
                 
                 # 2. 執行日常維護任務
                 maintenance_report = await system_manager.auto_maintenance.run_daily_maintenance()
@@ -1419,30 +1475,108 @@ async def schedule_daily_maintenance():
                 if failed_tasks > 0:
                     logger.warning(f"⚠️ 運維任務失敗項目: {maintenance_report.get('tasks_failed', [])}")
                 
-                # 3. 維護完成後重新調度任務，確保時間同步準確性
-                logger.info("🔄 重新調度定期任務以確保時間同步...")
+                # 4. 🔍 維護完成狀態驗證 - 確保所有工作都正確完成並記錄
+                logger.info("🔍 驗證維護工作完成狀態...")
+                maintenance_validation_passed = True
+                validation_issues = []
+                
                 try:
-                    global rate_check_task, health_check_task
+                    # 驗證詳細健康檢查是否已正確記錄
+                    health_history = data_manager.data.get('health_check_history', {})
+                    last_detailed = health_history.get('last_detailed_check')
                     
-                    # 取消現有任務
-                    if rate_check_task and not rate_check_task.cancelled():
-                        rate_check_task.cancel()
-                        logger.info("🔄 已取消舊的匯率檢查任務")
+                    if not last_detailed or not last_detailed.get('timestamp'):
+                        maintenance_validation_passed = False
+                        validation_issues.append("詳細健康檢查結果未正確保存")
+                        logger.error("❌ 詳細健康檢查結果驗證失敗")
+                    else:
+                        # 檢查時間戳是否是最近的（1小時內）
+                        check_time = datetime.fromisoformat(last_detailed['timestamp'].replace('Z', '+00:00'))
+                        time_diff = (datetime.now() - check_time.replace(tzinfo=None)).total_seconds()
+                        if time_diff > 3600:  # 超過1小時
+                            maintenance_validation_passed = False
+                            validation_issues.append(f"詳細健康檢查時間過舊 ({time_diff/60:.1f}分鐘前)")
+                        else:
+                            logger.info(f"✅ 詳細健康檢查記錄驗證通過: {last_detailed['timestamp']}")
                     
-                    if health_check_task and not health_check_task.cancelled():
-                        health_check_task.cancel()
-                        logger.info("🔄 已取消舊的健康檢查任務")
+                    # 驗證維護任務是否都成功完成
+                    if failed_tasks > 0:
+                        maintenance_validation_passed = False
+                        validation_issues.append(f"有 {failed_tasks} 個維護任務失敗")
+                        logger.warning(f"⚠️ 維護任務驗證: 有失敗項目")
+                    else:
+                        logger.info(f"✅ 維護任務驗證通過: {completed_tasks} 個任務全部成功")
                     
-                    # 等待短暫時間確保任務完全取消
-                    await asyncio.sleep(1)
+                    # 驗證數據文件完整性
+                    if not os.path.exists(data_manager.data_file):
+                        maintenance_validation_passed = False
+                        validation_issues.append("主數據文件不存在")
+                    else:
+                        file_size = os.path.getsize(data_manager.data_file)
+                        if file_size < 100:  # 文件太小可能有問題
+                            maintenance_validation_passed = False
+                            validation_issues.append(f"數據文件異常小 ({file_size} bytes)")
+                        else:
+                            logger.info(f"✅ 數據文件驗證通過: {file_size} bytes")
                     
-                    # 重新啟動匯率檢查任務
-                    rate_check_task = asyncio.create_task(schedule_rate_check())
-                    logger.info("✅ 匯率檢查任務已重新調度")
+                    if maintenance_validation_passed:
+                        logger.info("✅ 維護工作完成狀態驗證通過，準備進行備份和重新調度")
+                    else:
+                        logger.error(f"❌ 維護工作驗證失敗: {', '.join(validation_issues)}")
+                        logger.error("❌ 將延遲備份和重新調度，等待問題解決")
+                        
+                except Exception as e:
+                    logger.error(f"❌ 維護完成狀態驗證過程異常: {e}")
+                    maintenance_validation_passed = False
+                    validation_issues.append(f"驗證過程異常: {str(e)}")
+                
+                # 5. 💾 只有在驗證通過後才執行備份
+                if maintenance_validation_passed:
+                    logger.info("💾 維護工作已完成並驗證，開始創建備份...")
+                    try:
+                        backup_path = backup_manager.create_backup()
+                        if backup_path:
+                            logger.info(f"✅ 維護後備份創建成功: {os.path.basename(backup_path)}")
+                        else:
+                            logger.warning("⚠️ 維護後備份創建失敗")
+                    except Exception as e:
+                        logger.error(f"❌ 維護後備份創建異常: {e}")
+                else:
+                    logger.warning("⚠️ 由於驗證失敗，跳過備份創建")
+                
+                # 6. 執行維護後的健康檢查驗證（在重新調度之前）
+                logger.info("🔍 執行維護後健康檢查驗證...")
+                try:
+                    post_maintenance_health = await system_manager.health_monitor.quick_health_check()
+                    post_health_status = post_maintenance_health.get('status', 'unknown')
+                    logger.info(f"📋 維護後系統狀態: {post_health_status}")
                     
-                    # 重新啟動健康檢查任務
-                    health_check_task = asyncio.create_task(schedule_health_check())
-                    logger.info("✅ 健康檢查任務已重新調度")
+                    if post_health_status == 'healthy':
+                        logger.info("✅ 維護後系統狀態良好")
+                    else:
+                        logger.warning(f"⚠️ 維護後系統仍有問題: {post_health_status}")
+                        # 如果系統狀態不佳，也影響重新調度決策
+                        if maintenance_validation_passed:  # 只有在之前驗證通過時才更新狀態
+                            maintenance_validation_passed = False
+                            validation_issues.append(f"維護後系統狀態不佳: {post_health_status}")
+                        
+                except Exception as e:
+                    logger.error(f"❌ 維護後健康檢查失敗: {e}")
+                
+                # 7. 只有在所有驗證都通過後才重新調度任務
+                if maintenance_validation_passed:
+                    logger.info("🔄 所有維護工作已完成並驗證，開始重新調度定期任務...")
+                else:
+                    logger.warning(f"⚠️ 維護驗證未通過({', '.join(validation_issues)})，延遲重新調度")
+                    logger.info("⏰ 將在1小時後重新檢查並嘗試重新調度")
+                    await asyncio.sleep(3600)  # 等待1小時後重試
+                    continue  # 回到循環開始，重新檢查狀態
+                # 8. 重新調度定期任務（只有在驗證通過時執行）
+                logger.info("🔄 重新調度定期任務以確保時間同步準確性...")
+                try:
+                    # 使用 TaskManager 重新調度任務
+                    await task_manager.start_tasks()
+                    logger.info("✅ 所有定期任務已重新調度")
                     
                     # 計算下次檢查時間並記錄
                     now = datetime.now()
@@ -1464,26 +1598,20 @@ async def schedule_daily_maintenance():
                     logger.info(f"📅 下次匯率檢查: {next_rate_check.strftime('%H:%M')}")
                     logger.info(f"📅 下次健康檢查: {next_health_check.strftime('%H:%M')}")
                     
+                    # 記錄成功完成的維護
+                    logger.info("⚙️ 完整的每日維護循環已成功完成")
+                    logger.info("✅ 所有維護工作已完成、驗證、備份並重新調度")
+                    
                 except Exception as e:
                     logger.error(f"❌ 重新調度任務失敗: {e}")
                 
-                # 4. 執行維護後的健康檢查驗證
-                logger.info("🔍 執行維護後健康檢查驗證...")
-                try:
-                    post_maintenance_health = await system_manager.health_monitor.quick_health_check()
-                    post_health_status = post_maintenance_health.get('status', 'unknown')
-                    logger.info(f"📋 維護後系統狀態: {post_health_status}")
-                    
-                    if post_health_status == 'healthy':
-                        logger.info("✅ 維護後系統狀態良好")
-                    else:
-                        logger.warning(f"⚠️ 維護後系統仍有問題: {post_health_status}")
-                        
-                except Exception as e:
-                    logger.error(f"❌ 維護後健康檢查失敗: {e}")
-                
                 # 記錄維護完成後的狀態
                 logger.info("⚙️ 每日維護任務已完成，系統繼續監控中...")
+                
+                # 計算並記錄下次維護時間
+                tomorrow = datetime.now() + timedelta(days=1)
+                next_maintenance_time = tomorrow.replace(hour=2, minute=0, second=0, microsecond=0)
+                logger.info(f"⏰ 下次維護時間: {next_maintenance_time.strftime('%Y-%m-%d %H:%M:%S')} (24.0小時後)")
                 
             else:
                 logger.warning("⚠️ 系統管理器未初始化，跳過每日維護")

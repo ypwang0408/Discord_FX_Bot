@@ -28,7 +28,23 @@ class ServerDataManager:
             self.data['rate_history'] = []
         # 初始化健康檢查歷史
         if 'health_check_history' not in self.data:
-            self.data['health_check_history'] = {}
+            self.data['health_check_history'] = {
+                'last_quick_check': None,
+                'last_detailed_check': None,
+                'problem_history': []
+            }
+        # 確保健康檢查歷史有正確的結構
+        elif not isinstance(self.data['health_check_history'], dict) or 'last_quick_check' not in self.data['health_check_history']:
+            # 保留現有的詳細檢查資料（如果存在）
+            existing_detailed = None
+            if isinstance(self.data.get('health_check_history'), dict):
+                existing_detailed = self.data['health_check_history'].get('last_detailed_check')
+            
+            self.data['health_check_history'] = {
+                'last_quick_check': None,
+                'last_detailed_check': existing_detailed,  # 保留現有的詳細檢查
+                'problem_history': []
+            }
     
     def load_data(self):
         """載入伺服器數據"""
@@ -265,9 +281,8 @@ class ServerDataManager:
     def add_health_check_record(self, health_report, check_type='quick'):
         """添加健康檢查記錄 - 簡化結構版本"""
         try:
-            now = datetime.now()
-            # 只精準到分鐘
-            timestamp = now.strftime("%Y-%m-%dT%H:%M")
+            # 使用統一的時間精確度函數
+            timestamp = get_minute_precision_timestamp()
             status = health_report.get('status', 'unknown')
             
             # 初始化新的簡化結構
@@ -278,11 +293,16 @@ class ServerDataManager:
                     'problem_history': []
                 }
             
-            # 如果是舊格式，直接清空重新開始
+            # 如果是舊格式，保留現有資料並補完缺失的欄位
             if not isinstance(self.data['health_check_history'], dict) or 'last_quick_check' not in self.data['health_check_history']:
+                # 保留現有的詳細檢查資料（如果存在）
+                existing_detailed = None
+                if isinstance(self.data.get('health_check_history'), dict):
+                    existing_detailed = self.data['health_check_history'].get('last_detailed_check')
+                
                 self.data['health_check_history'] = {
                     'last_quick_check': None,
-                    'last_detailed_check': None,
+                    'last_detailed_check': existing_detailed,  # 保留現有的詳細檢查
                     'problem_history': []
                 }
             
@@ -356,7 +376,7 @@ class ServerDataManager:
             
             # 清理超過指定天數的問題記錄
             cutoff_date = datetime.now() - timedelta(days=days)
-            cutoff_str = cutoff_date.strftime("%Y-%m-%dT%H:%M")
+            cutoff_str = cutoff_date.replace(second=0, microsecond=0).strftime("%Y-%m-%dT%H:%M")
             
             self.data['health_check_history']['problem_history'] = [
                 record for record in self.data['health_check_history']['problem_history']

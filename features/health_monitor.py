@@ -532,8 +532,9 @@ class SystemHealthMonitor:
                             'status': 'healthy' if response.status == 200 else 'error',
                             'response_time_ms': round(response_time, 2)
                         }
-            except:
-                quick_report['checks']['api'] = {'status': 'error'}
+            except Exception as e:
+                logger.warning(f"API 連接檢查失敗: {e}")
+                quick_report['checks']['api'] = {'status': 'error', 'error': str(e)}
             
             # 快速資源檢查
             memory = psutil.virtual_memory()

@@ -24,7 +24,8 @@ class RateChartGenerator:
         # 設定圖表樣式
         try:
             plt.rcParams['font.sans-serif'] = ['DejaVu Sans', 'SimHei', 'Microsoft JhengHei']
-        except:
+        except (KeyError, ValueError) as e:
+            logger.warning(f"設定字體失敗，使用預設字體: {e}")
             plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
         plt.rcParams['axes.unicode_minus'] = False
         plt.rcParams['figure.facecolor'] = 'white'

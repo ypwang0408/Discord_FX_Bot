@@ -269,7 +269,8 @@ class SystemManager:
             create_time = datetime.fromtimestamp(current_process.create_time())
             uptime = datetime.now() - create_time
             return round(uptime.total_seconds() / 3600, 2)
-        except:
+        except (ImportError, psutil.NoSuchProcess, OSError) as e:
+            logger.warning(f"獲取系統運行時間失敗: {e}")
             return 0.0
     
     def _get_current_memory_usage(self) -> float:
@@ -279,7 +280,8 @@ class SystemManager:
             current_process = psutil.Process()
             memory_info = current_process.memory_info()
             return round(memory_info.rss / (1024**2), 2)
-        except:
+        except (ImportError, psutil.NoSuchProcess, OSError) as e:
+            logger.warning(f"獲取記憶體使用量失敗: {e}")
             return 0.0
     
     async def _save_health_check_result(self, health_report: Dict, check_type: str = 'quick'):
@@ -288,26 +290,51 @@ class SystemManager:
             # 轉換健康報告格式以符合 data_manager 的期望
             formatted_report = {
                 'status': health_report.get('overall_status', 'unknown'),
-                'checks': health_report.get('details', {}),
-                'warnings': [],
-                'errors': []
+                'checks': health_report.get('checks', {}),  # 修正：使用 'checks' 而不是 'details'
+                'warnings': health_report.get('warnings', []),  # 直接使用原有的 warnings
+                'errors': health_report.get('errors', [])       # 直接使用原有的 errors
             }
             
-            # 提取警告和錯誤
-            for check_name, check_result in health_report.get('details', {}).items():
-                if isinstance(check_result, dict) and 'status' in check_result:
-                    status = check_result['status']
-                    message = check_result.get('message', '')
-                    
-                    if status == 'warning':
-                        formatted_report['warnings'].append(f"{check_name}: {message}")
-                    elif status == 'critical':
-                        formatted_report['errors'].append(f"{check_name}: {message}")
+            # 補充提取警告和錯誤（如果原報告中沒有）
+            if not formatted_report['warnings'] and not formatted_report['errors']:
+                for check_name, check_result in health_report.get('checks', {}).items():
+                    if isinstance(check_result, dict) and 'status' in check_result:
+                        status = check_result['status']
+                        message = check_result.get('message', '')
+                        
+                        if status == 'warning':
+                            formatted_report['warnings'].append(f"{check_name}: {message}")
+                        elif status in ['critical', 'error']:
+                            formatted_report['errors'].append(f"{check_name}: {message}")
             
             # 使用 data_manager 保存健康檢查記錄，指定檢查類型
             self.data_manager.add_health_check_record(formatted_report, check_type)
             
             logger.info(f"✅ {check_type} 健康檢查結果已保存: {health_report.get('overall_status')}")
+            
+            # 🔍 驗證保存是否成功
+            health_history = self.data_manager.data.get('health_check_history', {})
+            if check_type == 'detailed':
+                last_detailed = health_history.get('last_detailed_check')
+                if last_detailed and last_detailed.get('timestamp'):
+                    logger.info(f"✅ 詳細檢查保存驗證成功: {last_detailed['timestamp']}")
+                else:
+                    logger.error("❌ 詳細檢查保存驗證失敗")
+            elif check_type == 'quick':
+                last_quick = health_history.get('last_quick_check')
+                if last_quick and last_quick.get('timestamp'):
+                    logger.debug(f"✅ 快速檢查保存驗證成功: {last_quick['timestamp']}")
+                else:
+                    logger.warning("⚠️ 快速檢查保存驗證失敗")
+            
+        except Exception as e:
+            logger.error(f"❌ 保存健康檢查結果失敗: {e}")
+            # 如果保存失敗，嘗試直接使用 record_health_check 方法作為備用
+            try:
+                self.data_manager.record_health_check(health_report, check_type)
+                logger.info(f"✅ 使用備用方法保存 {check_type} 健康檢查成功")
+            except Exception as backup_error:
+                logger.error(f"❌ 備用保存方法也失敗: {backup_error}")
             
         except Exception as e:
             logger.error(f"❌ 保存健康檢查結果時發生錯誤: {e}")
