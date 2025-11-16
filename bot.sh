@@ -3,23 +3,36 @@
 # Discord Bot Management Script (Modular Version)
 # Simple wrapper for common bot operations
 
+# Resolve project root (this script is in project root)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$SCRIPT_DIR"
+
+# Load .env if present (allows overriding BOT_DIR)
+if [ -f "$PROJECT_ROOT/.env" ]; then
+    # shellcheck disable=SC1090
+    source "$PROJECT_ROOT/.env"
+fi
+
+# Default BOT_DIR to project root if not provided in .env
+: "${BOT_DIR:=$PROJECT_ROOT}"
+
 case "$1" in
     start)
         echo "🚀 Starting Discord Bot..."
-        ./scripts/start.sh
+        "$BOT_DIR/scripts/start.sh"
         ;;
     stop)
         echo "🛑 Stopping Discord Bot..."
-        ./scripts/stop.sh
+        "$BOT_DIR/scripts/stop.sh"
         ;;
     restart)
         echo "🔄 Restarting Discord Bot..."
-        ./scripts/stop.sh
+        "$BOT_DIR/scripts/stop.sh"
         sleep 2
-        ./scripts/start.sh
+        "$BOT_DIR/scripts/start.sh"
         ;;
     status)
-        ./scripts/status.sh
+        "$BOT_DIR/scripts/status.sh"
         ;;
     logs)
         echo "📋 Viewing Bot logs (Press Ctrl+B then D to detach)..."
@@ -27,17 +40,13 @@ case "$1" in
         ;;
     test)
         echo "🧪 Testing modular architecture..."
-        source venv/bin/activate
-        python3 -c "
-from features import *
-print('✅ All modules imported successfully')
-print('📊 Available modules:')
-print('  - ServerDataManager')
-print('  - ExchangeRateMonitor') 
-print('  - DataBackupManager')
-print('  - RateChartGenerator')
-print('  - NotificationSystem')
-"
+        # Use venv under BOT_DIR if present
+        if [ -f "$BOT_DIR/venv/bin/activate" ]; then
+            # shellcheck disable=SC1090
+            source "$BOT_DIR/venv/bin/activate"
+        fi
+        cd "$BOT_DIR"
+        python3 -c "from features import *; print('✅ All modules imported successfully'); print('📊 Available modules:'); print('  - ServerDataManager'); print('  - ExchangeRateMonitor'); print('  - DataBackupManager'); print('  - RateChartGenerator'); print('  - NotificationSystem')"
         ;;
     *)
         echo "🤖 Discord Bot Management (Modular Version)"
@@ -53,9 +62,9 @@ print('  - NotificationSystem')
         echo "  test     - Test modular architecture"
         echo ""
         echo "Examples:"
-        echo "  $0 start     # Start the bot"
-        echo "  $0 status    # Check if bot is running"
-        echo "  $0 logs      # View live logs"
+        echo "  $BOT_DIR/bot.sh start     # Start the bot"
+        echo "  $BOT_DIR/bot.sh status    # Check if bot is running"
+        echo "  $BOT_DIR/bot.sh logs      # View live logs"
         exit 1
         ;;
 esac

@@ -524,9 +524,9 @@ class AutoMaintenance:
 echo "自動重啟 Discord Bot..."
 sleep 5
 cd /home/ypwang/Discord_FX_Bot
-./scripts/stop.sh
+/home/ypwang/Discord_FX_Bot/scripts/stop.sh
 sleep 3
-./scripts/start.sh
+/home/ypwang/Discord_FX_Bot/scripts/start.sh
 echo "重啟完成"
 """
             
