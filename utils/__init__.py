@@ -11,6 +11,8 @@ from .time_utils import (
     format_timestamp_display,
     get_time_difference_display
 )
+from .schedule_manager import ScheduleManager
+from .notification_helper import NotificationHelper
 
 __all__ = [
     'require_admin_permission',
@@ -18,5 +20,7 @@ __all__ = [
     'EmbedBuilder',
     'parse_timestamp_safe',
     'format_timestamp_display',
-    'get_time_difference_display'
+    'get_time_difference_display',
+    'ScheduleManager',
+    'NotificationHelper'
 ]

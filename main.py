@@ -31,7 +31,9 @@ from utils import (
     EmbedBuilder,
     parse_timestamp_safe,
     format_timestamp_display,
-    get_time_difference_display
+    get_time_difference_display,
+    ScheduleManager,
+    NotificationHelper
 )
 
 # 載入環境變數
@@ -1019,36 +1021,11 @@ async def maintenance_slash(interaction: discord.Interaction, operation: str = "
 
 async def schedule_rate_check():
     """每小時整點和30分執行匯率檢查"""
-    while True:
-        try:
-            # 計算到下一個整點或30分的時間
-            now = datetime.now()
-            next_check_time = None
-            
-            if now.minute < 30:
-                # 到30分
-                next_check_time = now.replace(minute=30, second=0, microsecond=0)
-            else:
-                # 到下一個整點
-                next_check_time = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
-            
-            sleep_seconds = (next_check_time - now).total_seconds()
-            
-            logger.info(f"⏰ 下次匯率檢查時間: {next_check_time.strftime('%H:%M')} ({sleep_seconds/60:.1f}分鐘後)")
-            
-            # 等待到檢查時間
-            await asyncio.sleep(sleep_seconds)
-            
-            # 執行匯率檢查
-            await perform_rate_check()
-            
-        except asyncio.CancelledError:
-            logger.info("🔄 匯率檢查任務已被取消")
-            break
-        except Exception as e:
-            logger.error(f"匯率檢查任務異常: {e}")
-            # 等待10分鐘後重試
-            await asyncio.sleep(600)
+    await ScheduleManager.run_on_schedule(
+        minute_targets=[0, 30],
+        task_func=perform_rate_check,
+        task_name="匯率檢查"
+    )
 
 async def perform_rate_check():
     """執行匯率檢查和通知"""
@@ -1090,30 +1067,11 @@ async def perform_rate_check():
                     last_rate_time=get_minute_precision_timestamp()
                 )
                 
-                # 判斷是否需要發送通知
-                should_notify = False
-                notification_reason = ""
-                
+                # 判斷是否需要發送通知（使用NotificationHelper統一邏輯）
                 last_was_above_threshold = server_data.get('last_was_above_threshold')
-                
-                # 條件1: 匯率低於閾值且之前高於閾值 (狀態改變)
-                if (rate < threshold and 
-                    last_was_above_threshold is not None and 
-                    last_was_above_threshold):
-                    should_notify = True
-                    notification_reason = "匯率跌破閾值 / Rate dropped below threshold"
-                
-                # 條件2: 匯率低於閾值且當前時間是早上9點
-                elif (rate < threshold and 
-                      now.hour == 9 and now.minute == 0):
-                    should_notify = True
-                    notification_reason = "早上9點定時通知 / 9 AM scheduled notification"
-                
-                # 條件3: 匯率低於閾值且當前時間是晚上9點
-                elif (rate < threshold and 
-                      now.hour == 21 and now.minute == 0):
-                    should_notify = True
-                    notification_reason = "晚上9點定時通知 / 9 PM scheduled notification"
+                should_notify, notification_reason = NotificationHelper.should_notify_rate_alert(
+                    rate, threshold, last_was_above_threshold, now
+                )
                 
                 # 更新狀態記錄
                 rate_monitor.update_server_state(
@@ -1145,39 +1103,11 @@ async def perform_rate_check():
 
 async def schedule_health_check():
     """每小時15分和45分執行健康檢查"""
-    while True:
-        try:
-            # 計算到下一個15分或45分的時間
-            now = datetime.now()
-            next_check_time = None
-            
-            if now.minute < 15:
-                # 到15分
-                next_check_time = now.replace(minute=15, second=0, microsecond=0)
-            elif now.minute < 45:
-                # 到45分
-                next_check_time = now.replace(minute=45, second=0, microsecond=0)
-            else:
-                # 到下一個小時的15分
-                next_check_time = now.replace(minute=15, second=0, microsecond=0) + timedelta(hours=1)
-            
-            sleep_seconds = (next_check_time - now).total_seconds()
-            
-            logger.info(f"⏰ 下次健康檢查時間: {next_check_time.strftime('%H:%M')} ({sleep_seconds/60:.1f}分鐘後)")
-            
-            # 等待到檢查時間
-            await asyncio.sleep(sleep_seconds)
-            
-            # 執行健康檢查
-            await perform_health_check()
-            
-        except asyncio.CancelledError:
-            logger.info("🔄 健康檢查任務已被取消")
-            break
-        except Exception as e:
-            logger.error(f"健康檢查任務異常: {e}")
-            # 等待10分鐘後重試
-            await asyncio.sleep(600)
+    await ScheduleManager.run_on_schedule(
+        minute_targets=[15, 45],
+        task_func=perform_health_check,
+        task_name="健康檢查"
+    )
 
 async def perform_health_check():
     """執行健康檢查（使用快速檢查以提高效率）"""
