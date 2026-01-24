@@ -39,15 +39,40 @@ from utils import (
 # 載入環境變數
 load_dotenv()
 
-# 設定日誌
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('bot.log', encoding='utf-8'),
-        logging.StreamHandler()
-    ]
+# 設定日誌 - 使用日誌輪轉
+from logging.handlers import TimedRotatingFileHandler
+import sys
+
+# 創建logs目錄（如果不存在）
+os.makedirs('logs', exist_ok=True)
+
+# 配置日誌格式
+log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+log_level = logging.INFO
+
+# 創建日誌處理器
+# 1. 按日輪轉的文件處理器（每天午夜輪轉，保留30天）
+file_handler = TimedRotatingFileHandler(
+    filename='logs/bot.log',
+    when='midnight',
+    interval=1,
+    backupCount=30,
+    encoding='utf-8'
 )
+file_handler.setFormatter(logging.Formatter(log_format))
+file_handler.setLevel(log_level)
+
+# 2. 控制台處理器
+console_handler = logging.StreamHandler(sys.stdout)
+console_handler.setFormatter(logging.Formatter(log_format))
+console_handler.setLevel(log_level)
+
+# 配置根日誌記錄器
+root_logger = logging.getLogger()
+root_logger.setLevel(log_level)
+root_logger.addHandler(file_handler)
+root_logger.addHandler(console_handler)
+
 logger = logging.getLogger(__name__)
 
 # 設定Discord Bot
