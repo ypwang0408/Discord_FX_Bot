@@ -24,6 +24,16 @@ from features import (
 )
 from features.data_manager import get_minute_precision_timestamp
 
+# 導入工具模組
+from utils import (
+    require_admin_permission,
+    require_guild,
+    EmbedBuilder,
+    parse_timestamp_safe,
+    format_timestamp_display,
+    get_time_difference_display
+)
+
 # 載入環境變數
 load_dotenv()
 
@@ -152,32 +162,20 @@ async def rate_slash(interaction: discord.Interaction):
         data_manager.add_rate_history(guild_id, rate)
         
         # 創建嵌入式訊息
-        embed = discord.Embed(
-            title="💴 玉山銀行日幣匯率 / E.SUN Bank JPY Rate",
-            color=0x00ff00 if rate >= threshold else 0xff0000,
-            timestamp=datetime.now()
-        )
-        
-        embed.add_field(
-            name="當前匯率 / Current Rate",
-            value=f"**{rate:.4f} JPY/TWD**",
-            inline=False
-        )
-        
-        embed.add_field(
-            name="監控閾值 / Threshold",
-            value=f"{threshold} JPY/TWD",
-            inline=False
-        )
-        
         status = "❌ 高於閾值 / Above threshold" if rate >= threshold else "⚠️ 低於閾值 / Below threshold"
-        embed.add_field(
-            name="狀態 / Status",
-            value=status,
-            inline=False
-        )
-        
-        embed.set_footer(text="資料來源: 玉山銀行 / Source: E.SUN Bank")
+
+        embed_builder = EmbedBuilder("💴 玉山銀行日幣匯率 / E.SUN Bank JPY Rate")
+        if rate >= threshold:
+            embed_builder.success()
+        else:
+            embed_builder.error()
+
+        embed = (embed_builder
+            .add_field("當前匯率 / Current Rate", f"**{rate:.4f} JPY/TWD**")
+            .add_field("監控閾值 / Threshold", f"{threshold} JPY/TWD")
+            .add_field("狀態 / Status", status)
+            .with_esun_footer()
+            .build())
         
         await interaction.followup.send(embed=embed)
     else:
@@ -185,15 +183,11 @@ async def rate_slash(interaction: discord.Interaction):
 
 @bot.tree.command(name="threshold", description="設定匯率監控閾值 / Set exchange rate monitoring threshold")
 @app_commands.describe(threshold="監控閾值 (0.1-1.0) / Monitoring threshold (0.1-1.0)")
+@require_admin_permission()
 async def threshold_slash(interaction: discord.Interaction, threshold: float):
     """設定匯率監控閾值"""
     if not interaction.guild:
         await interaction.response.send_message("此指令只能在伺服器中使用 / This command can only be used in a server")
-        return
-        
-    # 檢查用戶是否為管理員
-    if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("❌ 此指令需要管理員權限 / This command requires administrator permission")
         return
     
     if 0.1 <= threshold <= 1.0:
@@ -214,15 +208,11 @@ async def channel_slash(interaction: discord.Interaction):
 
 @bot.tree.command(name="mention", description="設定是否使用@everyone通知 / Set @everyone mention notifications")
 @app_commands.describe(enable="是否啟用@everyone通知 / Whether to enable @everyone mentions")
+@require_admin_permission()
 async def mention_slash(interaction: discord.Interaction, enable: bool):
     """設定是否使用@everyone通知"""
     if not interaction.guild:
         await interaction.response.send_message("此指令只能在伺服器中使用 / This command can only be used in a server")
-        return
-        
-    # 檢查用戶是否為管理員
-    if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("❌ 此指令需要管理員權限 / This command requires administrator permission")
         return
     
     data_manager.set_use_everyone_mention(interaction.guild.id, enable)
@@ -238,88 +228,60 @@ async def status_slash(interaction: discord.Interaction):
         
     guild_id = interaction.guild.id
     server_data = data_manager.get_server_data(guild_id)
-    
-    embed = discord.Embed(
-        title="🤖 機器人狀態 / Bot Status",
-        color=0x0099ff,
-        timestamp=datetime.now()
+
+    # Build embed
+    embed_builder = EmbedBuilder("🤖 機器人狀態 / Bot Status").info()
+
+    embed_builder.add_field(
+        "監控閾值 / Threshold",
+        f"{server_data['threshold']} JPY/TWD"
     )
-    
-    embed.add_field(
-        name="監控閾值 / Threshold",
-        value=f"{server_data['threshold']} JPY/TWD",
-        inline=False
-    )
-    
+
     channel_id = server_data['channel_id']
-    embed.add_field(
-        name="通知頻道 / Notification Channel",
-        value=f"{f'<#{channel_id}>' if channel_id else '未設定 / Not set'}",
-        inline=False
+    embed_builder.add_field(
+        "通知頻道 / Notification Channel",
+        f"<#{channel_id}>" if channel_id else "未設定 / Not set"
     )
-    
-    # 分隔線
-    embed.add_field(name="\u200b", value="\n", inline=False)
-    
+
+    embed_builder.add_separator()
+
     last_rate = server_data['last_rate']
     last_rate_time = server_data.get('last_rate_time')
-    
+
     if last_rate and last_rate_time:
-        try:
-            rate_time = datetime.fromisoformat(last_rate_time)
-            rate_display = f"{last_rate:.4f} JPY/TWD ({rate_time.strftime('%m-%d %H:%M')})"
-        except (ValueError, TypeError) as e:
-            logger.warning(f"解析匯率時間失敗: {e}, last_rate_time: {last_rate_time}")
+        rate_display = format_timestamp_display(last_rate_time, '%m-%d %H:%M')
+        if rate_display != "時間格式錯誤 / Invalid time format":
+            rate_display = f"{last_rate:.4f} JPY/TWD ({rate_display})"
+        else:
             rate_display = f"{last_rate:.4f} JPY/TWD" if last_rate else "無 / None"
     else:
         rate_display = f"{last_rate:.4f} JPY/TWD" if last_rate else "無 / None"
-    
-    embed.add_field(
-        name="最後匯率 / Last Rate",
-        value=f"{rate_display}",
-        inline=False
-    )
-    
+
+    embed_builder.add_field("最後匯率 / Last Rate", rate_display)
+
     last_was_above = server_data['last_was_above_threshold']
-    embed.add_field(
-        name="上次狀態 / Last Status",
-        value=f"{'❌ 高於閾值 / Above threshold' if last_was_above else '⚠️ 低於閾值 / Below threshold' if last_was_above is not None else '❓ 未知 / Unknown'}",
-        inline=False
+    status_text = (
+        "❌ 高於閾值 / Above threshold" if last_was_above
+        else "⚠️ 低於閾值 / Below threshold" if last_was_above is not None
+        else "❓ 未知 / Unknown"
     )
-    
-    embed.add_field(
-        name="監控狀態 / Monitor Status",
-        value="✅ 運行中 / Running",
-        inline=False
-    )
-    
-    # 分隔線
-    embed.add_field(name="\u200b", value="\n", inline=False)
-    
+    embed_builder.add_field("上次狀態 / Last Status", status_text)
+
+    embed_builder.add_field("監控狀態 / Monitor Status", "✅ 運行中 / Running")
+
+    embed_builder.add_separator()
+
     last_notification = server_data['last_notification_time']
     if last_notification:
-        try:
-            notification_time = datetime.fromisoformat(last_notification)
-            embed.add_field(
-                name="最後通知時間 / Last Notification",
-                value=f"{notification_time.strftime('%Y-%m-%d %H:%M:%S')}",
-                inline=False
-            )
-        except (ValueError, TypeError) as e:
-            logger.warning(f"解析通知時間失敗: {e}, last_notification: {last_notification}")
-            embed.add_field(
-                name="最後通知時間 / Last Notification",
-                value="時間格式錯誤 / Invalid time format",
-                inline=False
-            )
-    
-    embed.add_field(
-        name="@everyone 通知 / @everyone Mention",
-        value=f"{'啟用 / Enabled' if server_data['use_everyone_mention'] else '停用 / Disabled'}",
-        inline=False
+        notification_display = format_timestamp_display(last_notification, '%Y-%m-%d %H:%M:%S')
+        embed_builder.add_field("最後通知時間 / Last Notification", notification_display)
+
+    embed_builder.add_field(
+        "@everyone 通知 / @everyone Mention",
+        "啟用 / Enabled" if server_data['use_everyone_mention'] else "停用 / Disabled"
     )
-    
-    await interaction.response.send_message(embed=embed)
+
+    await interaction.response.send_message(embed=embed_builder.build())
 
 @bot.tree.command(name="chart", description="生成匯率趨勢圖表 / Generate rate trend chart")
 @app_commands.describe(days="天數範圍 (1-30天) / Days range (1-30 days)")
@@ -344,15 +306,13 @@ async def chart_slash(interaction: discord.Interaction, days: int = 7):
         
         # 創建Discord文件物件
         file = discord.File(chart_buffer, filename=f"rate_chart_{days}days.png")
-        
-        embed = discord.Embed(
-            title=f"📈 日幣匯率趨勢圖 / JPY Rate Trend (Last {days} Days)",
-            color=0x00ff00,
-            timestamp=datetime.now()
-        )
-        embed.set_image(url=f"attachment://rate_chart_{days}days.png")
-        embed.set_footer(text="資料來源: 玉山銀行 / Source: E.SUN Bank")
-        
+
+        embed = (EmbedBuilder(f"📈 日幣匯率趨勢圖 / JPY Rate Trend (Last {days} Days)")
+            .success()
+            .with_image(f"attachment://rate_chart_{days}days.png")
+            .with_esun_footer()
+            .build())
+
         await interaction.followup.send(embed=embed, file=file)
         
     except Exception as e:
@@ -360,11 +320,9 @@ async def chart_slash(interaction: discord.Interaction, days: int = 7):
         await interaction.followup.send("❌ 生成圖表時發生錯誤 / Error occurred while generating chart")
 
 @bot.tree.command(name="backup", description="手動創建數據備份 / Manually create data backup")
+@require_admin_permission()
 async def backup_slash(interaction: discord.Interaction):
     """手動備份數據"""
-    if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("❌ 此指令需要管理員權限 / This command requires administrator permission")
-        return
     
     await interaction.response.send_message("💾 正在創建備份... / Creating backup...")
     
@@ -372,21 +330,20 @@ async def backup_slash(interaction: discord.Interaction):
         backup_path = backup_manager.create_backup()
         
         if backup_path:
-            embed = discord.Embed(
-                title="✅ 備份創建成功 / Backup Created Successfully",
-                description=f"備份檔案 / Backup File: `{os.path.basename(backup_path)}`",
-                color=0x00ff00,
-                timestamp=datetime.now()
-            )
-            
             # 獲取檔案大小
             file_size = os.path.getsize(backup_path)
-            embed.add_field(
-                name="檔案資訊 / File Info",
-                value=f"大小 / Size: {file_size} bytes\n位置 / Location: `{backup_path}`",
-                inline=False
-            )
-            
+
+            embed = (EmbedBuilder(
+                    "✅ 備份創建成功 / Backup Created Successfully",
+                    f"備份檔案 / Backup File: `{os.path.basename(backup_path)}`"
+                )
+                .success()
+                .add_field(
+                    "檔案資訊 / File Info",
+                    f"大小 / Size: {file_size} bytes\n位置 / Location: `{backup_path}`"
+                )
+                .build())
+
             await interaction.followup.send(embed=embed)
         else:
             await interaction.followup.send("❌ 備份創建失敗 / Backup creation failed")
@@ -396,11 +353,9 @@ async def backup_slash(interaction: discord.Interaction):
         await interaction.followup.send("❌ 備份創建時發生錯誤 / Error occurred during backup creation")
 
 @bot.tree.command(name="list_backups", description="列出所有備份 / List all backups")
+@require_admin_permission()
 async def list_backups_slash(interaction: discord.Interaction):
     """列出備份"""
-    if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("❌ 此指令需要管理員權限 / This command requires administrator permission")
-        return
     
     try:
         backups = backup_manager.list_backups()
@@ -409,35 +364,30 @@ async def list_backups_slash(interaction: discord.Interaction):
             await interaction.response.send_message("📂 目前沒有任何備份檔案 / No backup files currently exist")
             return
         
-        embed = discord.Embed(
-            title="📋 備份檔案列表 / Backup Files List",
-            color=0x0099ff,
-            timestamp=datetime.now()
-        )
-        
         # 只顯示最近10個備份
         recent_backups = backups[-10:]
         backup_list = []
-        
+
         for backup in recent_backups:
-            backup_time = datetime.fromisoformat(backup['timestamp'])
+            backup_time_str = format_timestamp_display(backup['timestamp'], '%Y-%m-%d %H:%M:%S')
             backup_list.append(
                 f"• `{backup['filename']}`\n"
-                f"  📅 {backup_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+                f"  📅 {backup_time_str}\n"
                 f"  🗄️ {backup['servers_count']} servers | "
                 f"📦 {backup['file_size']} bytes"
             )
-        
-        embed.add_field(
-            name=f"最近 {len(recent_backups)} 個備份 / Recent {len(recent_backups)} Backups",
-            value="\n\n".join(backup_list) if backup_list else "無備份 / No backups",
-            inline=False
-        )
-        
+
+        embed_builder = (EmbedBuilder("📋 備份檔案列表 / Backup Files List")
+            .info()
+            .add_field(
+                f"最近 {len(recent_backups)} 個備份 / Recent {len(recent_backups)} Backups",
+                "\n\n".join(backup_list) if backup_list else "無備份 / No backups"
+            ))
+
         if len(backups) > 10:
-            embed.set_footer(text=f"總共有 {len(backups)} 個備份檔案，僅顯示最近10個 / Total {len(backups)} backup files, showing recent 10 only")
-        
-        await interaction.response.send_message(embed=embed)
+            embed_builder.with_footer(f"總共有 {len(backups)} 個備份檔案，僅顯示最近10個 / Total {len(backups)} backup files, showing recent 10 only")
+
+        await interaction.response.send_message(embed=embed_builder.build())
         
     except Exception as e:
         logger.error(f"列出備份失敗: {e}")
@@ -448,129 +398,99 @@ async def list_backups_slash(interaction: discord.Interaction):
 @bot.tree.command(name="help", description="顯示幫助訊息 / Show help message")
 async def help_slash(interaction: discord.Interaction):
     """顯示幫助訊息"""
-    embed = discord.Embed(
-        title="📚 指令說明 / Command Help",
-        description="玉山銀行日幣匯率監控機器人 / E.SUN Bank JPY Rate Monitor Bot",
-        color=0x00ff00
-    )
-    
-    embed.add_field(
-        name="📋 可用指令 / Available Commands",
-        value="**基本功能 / Basic Functions:**\n"
-              "`/rate` - 查詢當前匯率 / Check current rate\n"
-              "`/threshold <value>` - 設定監控閾值 / Set threshold\n"
-              "`/channel` - 設定通知頻道 / Set notification channel\n"
-              "`/status` - 查看機器人狀態 / Check bot status\n"
-              "`/rules` - 顯示通知規則 / Show notification rules\n"
-              "`/help` - 顯示此幫助訊息 / Show this help",
-        inline=False
-    )
-    
-    embed.add_field(
-        name="🔧 管理員指令 / Admin Commands",
-        value="`/permissions` - 檢查機器人權限 / Check bot permissions\n"
-              "`/sync` - 同步 Slash Commands / Sync Slash Commands\n"
-              "`/system` - 全面系統狀態檢查 / Comprehensive system check\n"
-              "`/mention <true/false>` - 設定@everyone通知 / Set @everyone notifications\n"
-              "`/backup` - 手動創建數據備份 / Manual data backup\n"
-              "`/list_backups` - 列出所有備份 / List all backups\n"
-              "`/health [quick]` - 系統健康檢查 / System health check\n"
-              "`/maintenance [operation]` - 系統維護管理 / System maintenance",
-        inline=False
-    )
-    
-    # 分隔線
-    embed.add_field(name="\u200b", value="\n", inline=False)
-    
-    embed.add_field(
-        name="📊 進階功能 / Advanced Features",
-        value="`/chart <days>` - 生成匯率趨勢圖表 / Generate rate trend chart\n"
-              "• 天數範圍：1-30天 / Days range: 1-30 days\n"
-              "• 顯示匯率變化和閾值線 / Shows rate changes and threshold line",
-        inline=False
-    )
-    
-    # 分隔線
-    embed.add_field(name="\u200b", value="\n", inline=False)
-    
-    embed.add_field(
-        name="💡 使用提示 / Usage Tips",
-        value="• 輸入 `/` 即可看到所有指令並自動補全 / Type `/` to see all commands with autocomplete\n"
-              "• 機器人會在整點和30分自動檢查匯率 / Bot automatically checks rate at :00 and :30\n"
-              "• 智慧通知系統避免重複訊息 / Smart notification system prevents spam\n"
-              "• 每個伺服器有獨立的設定 / Each server has independent settings\n"
-              "• 系統在15分和45分進行健康檢查 / Health checks at :15 and :45",
-        inline=False
-    )
-    
-    embed.set_footer(text="匯率檢查: 整點和30分 | 健康檢查: 15分和45分 / Rate check: :00 & :30 | Health check: :15 & :45")
-    
+    embed = (EmbedBuilder(
+            "📚 指令說明 / Command Help",
+            "玉山銀行日幣匯率監控機器人 / E.SUN Bank JPY Rate Monitor Bot"
+        )
+        .success()
+        .add_field(
+            "📋 可用指令 / Available Commands",
+            "**基本功能 / Basic Functions:**\n"
+            "`/rate` - 查詢當前匯率 / Check current rate\n"
+            "`/threshold <value>` - 設定監控閾值 / Set threshold\n"
+            "`/channel` - 設定通知頻道 / Set notification channel\n"
+            "`/status` - 查看機器人狀態 / Check bot status\n"
+            "`/rules` - 顯示通知規則 / Show notification rules\n"
+            "`/help` - 顯示此幫助訊息 / Show this help"
+        )
+        .add_field(
+            "🔧 管理員指令 / Admin Commands",
+            "`/permissions` - 檢查機器人權限 / Check bot permissions\n"
+            "`/sync` - 同步 Slash Commands / Sync Slash Commands\n"
+            "`/system` - 全面系統狀態檢查 / Comprehensive system check\n"
+            "`/mention <true/false>` - 設定@everyone通知 / Set @everyone notifications\n"
+            "`/backup` - 手動創建數據備份 / Manual data backup\n"
+            "`/list_backups` - 列出所有備份 / List all backups\n"
+            "`/health [quick]` - 系統健康檢查 / System health check\n"
+            "`/maintenance [operation]` - 系統維護管理 / System maintenance"
+        )
+        .add_separator()
+        .add_field(
+            "📊 進階功能 / Advanced Features",
+            "`/chart <days>` - 生成匯率趨勢圖表 / Generate rate trend chart\n"
+            "• 天數範圍：1-30天 / Days range: 1-30 days\n"
+            "• 顯示匯率變化和閾值線 / Shows rate changes and threshold line"
+        )
+        .add_separator()
+        .add_field(
+            "💡 使用提示 / Usage Tips",
+            "• 輸入 `/` 即可看到所有指令並自動補全 / Type `/` to see all commands with autocomplete\n"
+            "• 機器人會在整點和30分自動檢查匯率 / Bot automatically checks rate at :00 and :30\n"
+            "• 智慧通知系統避免重複訊息 / Smart notification system prevents spam\n"
+            "• 每個伺服器有獨立的設定 / Each server has independent settings\n"
+            "• 系統在15分和45分進行健康檢查 / Health checks at :15 and :45"
+        )
+        .with_footer("匯率檢查: 整點和30分 | 健康檢查: 15分和45分 / Rate check: :00 & :30 | Health check: :15 & :45")
+        .build())
+
     await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="rules", description="顯示通知規則 / Show notification rules")
 async def rules_slash(interaction: discord.Interaction):
     """顯示通知規則"""
-    embed = discord.Embed(
-        title="📋 通知規則 / Notification Rules",
-        description="智慧通知系統，避免重複訊息 / Smart notification system to avoid spam",
-        color=0xff9900
-    )
-    
-    embed.add_field(
-        name="🕐 檢查時間 / Check Schedule",
-        value="匯率檢查: 每小時的整點和30分 / Rate check: Every hour at :00 and :30\n"
-              "健康檢查: 每小時的15分和45分 / Health check: Every hour at :15 and :45",
-        inline=False
-    )
-    
-    embed.add_field(name="\u200b", value="\n", inline=False)
-    
-    embed.add_field(
-        name="🚨 通知條件 / Notification Conditions",
-        value="滿足以下任一條件時發送通知 / Notification sent when any condition is met:",
-        inline=False
-    )
-    
-    embed.add_field(
-        name="條件1 / Condition 1",
-        value="匯率從高於閾值變為低於閾值 / Rate drops from above to below threshold",
-        inline=False
-    )
-    
-    embed.add_field(
-        name="條件2 / Condition 2", 
-        value="早上9:00且匯率低於閾值 / 9:00 AM and rate is below threshold",
-        inline=False
-    )
-    
-    embed.add_field(
-        name="條件3 / Condition 3",
-        value="晚上9:00且匯率低於閾值 / 9:00 PM and rate is below threshold", 
-        inline=False
-    )
-    
-    embed.add_field(name="\u200b", value="\n", inline=False)
-    
-    embed.add_field(
-        name="💡 說明 / Note",
-        value="這樣可以避免持續低於閾值時的重複通知 / This prevents spam when rate stays below threshold",
-        inline=False
-    )
-    
-    embed.set_footer(text="玉山銀行匯率監控系統 / E.SUN Bank Rate Monitor")
-    
+    embed = (EmbedBuilder(
+            "📋 通知規則 / Notification Rules",
+            "智慧通知系統，避免重複訊息 / Smart notification system to avoid spam"
+        )
+        .warning()
+        .add_field(
+            "🕐 檢查時間 / Check Schedule",
+            "匯率檢查: 每小時的整點和30分 / Rate check: Every hour at :00 and :30\n"
+            "健康檢查: 每小時的15分和45分 / Health check: Every hour at :15 and :45"
+        )
+        .add_separator()
+        .add_field(
+            "🚨 通知條件 / Notification Conditions",
+            "滿足以下任一條件時發送通知 / Notification sent when any condition is met:"
+        )
+        .add_field(
+            "條件1 / Condition 1",
+            "匯率從高於閾值變為低於閾值 / Rate drops from above to below threshold"
+        )
+        .add_field(
+            "條件2 / Condition 2",
+            "早上9:00且匯率低於閾值 / 9:00 AM and rate is below threshold"
+        )
+        .add_field(
+            "條件3 / Condition 3",
+            "晚上9:00且匯率低於閾值 / 9:00 PM and rate is below threshold"
+        )
+        .add_separator()
+        .add_field(
+            "💡 說明 / Note",
+            "這樣可以避免持續低於閾值時的重複通知 / This prevents spam when rate stays below threshold"
+        )
+        .with_footer("玉山銀行匯率監控系統 / E.SUN Bank Rate Monitor")
+        .build())
+
     await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="permissions", description="檢查機器人權限狀態 / Check bot permissions status")
+@require_admin_permission()
 async def permissions_slash(interaction: discord.Interaction):
     """檢查機器人權限"""
     if not interaction.guild:
         await interaction.response.send_message("此指令只能在伺服器中使用 / This command can only be used in a server")
-        return
-    
-    # 檢查用戶是否為管理員
-    if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("❌ 此指令需要管理員權限 / This command requires administrator permission")
         return
     
     bot_member = interaction.guild.get_member(bot.user.id)
@@ -579,12 +499,13 @@ async def permissions_slash(interaction: discord.Interaction):
         return
     
     perms = bot_member.guild_permissions
-    
-    embed = discord.Embed(
-        title="🔐 機器人權限檢查 / Bot Permissions Check",
-        color=0x00ff00 if perms.send_messages else 0xff0000
-    )
-    
+
+    embed_builder = EmbedBuilder("🔐 機器人權限檢查 / Bot Permissions Check")
+    if perms.send_messages:
+        embed_builder.success()
+    else:
+        embed_builder.error()
+
     important_perms = {
         "發送訊息 / Send Messages": perms.send_messages,
         "嵌入連結 / Embed Links": perms.embed_links,
@@ -593,72 +514,58 @@ async def permissions_slash(interaction: discord.Interaction):
         "使用外部表情符號 / Use External Emojis": perms.use_external_emojis,
         "新增反應 / Add Reactions": perms.add_reactions,
     }
-    
+
     for perm_name, has_perm in important_perms.items():
         status = "✅" if has_perm else "❌"
-        embed.add_field(
-            name=f"{status} {perm_name}",
-            value="已授權 / Granted" if has_perm else "未授權 / Not granted",
-            inline=False
+        embed_builder.add_field(
+            f"{status} {perm_name}",
+            "已授權 / Granted" if has_perm else "未授權 / Not granted"
         )
-    
-    embed.add_field(name="\u200b", value="\n", inline=False)
-    
+
+    embed_builder.add_separator()
+
     # 檢查應用程式權限（Slash Commands相關）
     app_perms = interaction.guild.me.guild_permissions
     has_app_commands = hasattr(app_perms, 'use_application_commands') and app_perms.use_application_commands
-    
-    embed.add_field(
-        name=f"{'✅' if has_app_commands else '❌'} 使用應用程式指令 / Use Application Commands",
-        value="已授權 / Granted" if has_app_commands else "未授權 / Not granted",
-        inline=False
+
+    embed_builder.add_field(
+        f"{'✅' if has_app_commands else '❌'} 使用應用程式指令 / Use Application Commands",
+        "已授權 / Granted" if has_app_commands else "未授權 / Not granted"
     )
-    
+
     if not perms.send_messages:
-        embed.add_field(name="\u200b", value="\n", inline=False)
-        
-        embed.add_field(
-            name="⚠️ 注意 / Warning",
-            value="機器人需要基本權限才能正常運作\nBot needs basic permissions to function properly",
-            inline=False
+        embed_builder.add_separator()
+        embed_builder.add_field(
+            "⚠️ 注意 / Warning",
+            "機器人需要基本權限才能正常運作\nBot needs basic permissions to function properly"
         )
-    
-    await interaction.response.send_message(embed=embed)
+
+    await interaction.response.send_message(embed=embed_builder.build())
 
 @bot.tree.command(name="sync", description="手動同步 Slash Commands / Manually sync Slash Commands")
+@require_admin_permission()
 async def sync_slash(interaction: discord.Interaction):
     """手動同步 Slash Commands"""
-    # 檢查用戶是否為管理員
-    if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("❌ 此指令需要管理員權限 / This command requires administrator permission")
-        return
         
     await interaction.response.send_message("正在同步 Slash Commands... / Syncing Slash Commands...")
     
     try:
         synced = await bot.tree.sync()
-        embed = discord.Embed(
-            title="✅ 同步成功 / Sync Successful",
-            description=f"已同步 {len(synced)} 個 Slash Commands / Synced {len(synced)} Slash Commands",
-            color=0x00ff00
-        )
-        
+        embed_builder = EmbedBuilder(
+            "✅ 同步成功 / Sync Successful",
+            f"已同步 {len(synced)} 個 Slash Commands / Synced {len(synced)} Slash Commands"
+        ).success()
+
         if synced:
             cmd_list = "\n".join([f"• /{cmd.name}" for cmd in synced])
-            embed.add_field(
-                name="已同步的指令 / Synced Commands",
-                value=cmd_list,
-                inline=False
-            )
-        
-        await interaction.followup.send(embed=embed)
-        
+            embed_builder.add_field("已同步的指令 / Synced Commands", cmd_list)
+
+        await interaction.followup.send(embed=embed_builder.build())
+
     except Exception as e:
-        embed = discord.Embed(
-            title="❌ 同步失敗 / Sync Failed",
-            description=str(e),
-            color=0xff0000
-        )
+        embed = (EmbedBuilder("❌ 同步失敗 / Sync Failed", str(e))
+            .error()
+            .build())
         await interaction.followup.send(embed=embed)
 
 @bot.tree.command(name="system", description="檢查系統運行狀態和API可用性 / Check system status and API availability")
@@ -667,12 +574,9 @@ async def sync_slash(interaction: discord.Interaction):
     app_commands.Choice(name="快速檢查 / Quick Check", value="quick"),
     app_commands.Choice(name="詳細檢查 / Detailed Check", value="detailed")
 ])
+@require_admin_permission()
 async def system_slash(interaction: discord.Interaction, mode: str = "quick"):
     """全面的系統狀態檢查（整合版）"""
-    # 檢查用戶是否為管理員
-    if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("❌ 此指令需要管理員權限 / This command requires administrator permission")
-        return
     
     # 檢查系統管理器是否可用
     if system_manager is None:
@@ -727,69 +631,63 @@ async def system_slash(interaction: discord.Interaction, mode: str = "quick"):
         overall_status = system_report['overall_status']
     elif 'status' in system_report:
         overall_status = system_report['status']
-    
-    embed = discord.Embed(
-        title=title,
-        color=status_colors.get(overall_status, 0x888888),
-        timestamp=datetime.now()
-    )
-    
+
+    # Build embed with appropriate color
+    embed_builder = EmbedBuilder(title)
+    embed_builder.set_color(status_colors.get(overall_status, 0x888888))
+
     # 整體狀態
     status_emoji = {
         'healthy': '✅',
-        'warning': '⚠️', 
+        'warning': '⚠️',
         'error': '❌',
         'unknown': '❓'
     }
-    
-    embed.add_field(
-        name="🎯 整體狀態 / Overall Status",
-        value=f"{status_emoji.get(overall_status, '❓')} **{overall_status.upper()}**",
-        inline=False
+
+    embed_builder.add_field(
+        "🎯 整體狀態 / Overall Status",
+        f"{status_emoji.get(overall_status, '❓')} **{overall_status.upper()}**"
     )
     
     if mode == "detailed":
         # 詳細報告模式
         quick_stats = system_report.get('quick_stats', {})
-        
+
         # 確保 quick_stats 不是 None
         if quick_stats is None:
             quick_stats = {}
-        
+
         # 健康檢查摘要
         if quick_stats:
-            embed.add_field(
-                name="📊 健康檢查 / Health Checks",
-                value=f"檢查項目 / Total: {quick_stats.get('health_checks_total', 0)}\n"
-                      f"✅ 健康 / Healthy: {quick_stats.get('health_checks_healthy', 0)}\n"
-                      f"🔄 連續失敗 / Failures: {quick_stats.get('consecutive_failures', 0)}",
-                inline=False
+            embed_builder.add_field(
+                "📊 健康檢查 / Health Checks",
+                f"檢查項目 / Total: {quick_stats.get('health_checks_total', 0)}\n"
+                f"✅ 健康 / Healthy: {quick_stats.get('health_checks_healthy', 0)}\n"
+                f"🔄 連續失敗 / Failures: {quick_stats.get('consecutive_failures', 0)}"
             )
-            
+
             # 系統資源
             memory_percent = quick_stats.get('memory_usage_percent', 0)
             disk_percent = quick_stats.get('disk_usage_percent', 0)
             memory_gb = quick_stats.get('memory_used_gb', 0)
-            
-            embed.add_field(
-                name="💻 系統資源 / System Resources",
-                value=f"記憶體 / Memory: {memory_percent:.1f}% ({memory_gb:.1f}GB)\n"
-                      f"磁碟 / Disk: {disk_percent:.1f}%\n"
-                      f"API狀態 / API: {quick_stats.get('api_status', 'unknown')}",
-                inline=False
+
+            embed_builder.add_field(
+                "💻 系統資源 / System Resources",
+                f"記憶體 / Memory: {memory_percent:.1f}% ({memory_gb:.1f}GB)\n"
+                f"磁碟 / Disk: {disk_percent:.1f}%\n"
+                f"API狀態 / API: {quick_stats.get('api_status', 'unknown')}"
             )
-        
+
         # 建議
         recommendations = system_report.get('recommendations', [])
         if recommendations is None:
             recommendations = []
         if recommendations:
-            embed.add_field(
-                name="💡 系統建議 / Recommendations",
-                value='\n'.join([f"• {rec}" for rec in recommendations[:4]]),
-                inline=False
+            embed_builder.add_field(
+                "💡 系統建議 / Recommendations",
+                '\n'.join([f"• {rec}" for rec in recommendations[:4]])
             )
-        
+
         # 維護統計
         maintenance_info = system_report.get('maintenance', {})
         if maintenance_info is None:
@@ -798,58 +696,49 @@ async def system_slash(interaction: discord.Interaction, mode: str = "quick"):
             latest_activity_info = maintenance_info.get('latest_activity', {})
             if latest_activity_info is None:
                 latest_activity_info = {}
-            embed.add_field(
-                name="🔧 維護狀態 / Maintenance Status",
-                value=f"24小時活動 / 24h Activities: {maintenance_info.get('total_activities', 0)}\n"
-                      f"最新活動 / Latest: {latest_activity_info.get('activity_type', 'none')}",
-                inline=False
+            embed_builder.add_field(
+                "🔧 維護狀態 / Maintenance Status",
+                f"24小時活動 / 24h Activities: {maintenance_info.get('total_activities', 0)}\n"
+                f"最新活動 / Latest: {latest_activity_info.get('activity_type', 'none')}"
             )
-    
+
     else:
         # 快速報告模式
-        embed.add_field(
-            name="⏱️ 運行時間 / Uptime",
-            value=f"{system_report.get('uptime_hours', 0):.1f} 小時 / hours",
-            inline=False
+        embed_builder.add_field(
+            "⏱️ 運行時間 / Uptime",
+            f"{system_report.get('uptime_hours', 0):.1f} 小時 / hours"
         )
-        
-        embed.add_field(
-            name="💾 記憶體使用 / Memory Usage", 
-            value=f"{system_report.get('memory_usage_mb', 0):.1f} MB",
-            inline=False
+
+        embed_builder.add_field(
+            "💾 記憶體使用 / Memory Usage",
+            f"{system_report.get('memory_usage_mb', 0):.1f} MB"
         )
-        
+
         # 健康狀態指示
         is_healthy = system_report.get('is_healthy', False)
         health_status = "正常 / Healthy" if is_healthy else "需要注意 / Needs Attention"
-        embed.add_field(
-            name="🏥 健康狀態 / Health Status",
-            value=health_status,
-            inline=False
-        )
-        
+        embed_builder.add_field("🏥 健康狀態 / Health Status", health_status)
+
         # 如果有錯誤，顯示錯誤信息
         if system_report.get('error'):
-            embed.add_field(
-                name="❌ 錯誤信息 / Error",
-                value=system_report['error'][:200] + "..." if len(system_report['error']) > 200 else system_report['error'],
-                inline=False
-            )
+            error_msg = system_report['error']
+            error_display = error_msg[:200] + "..." if len(error_msg) > 200 else error_msg
+            embed_builder.add_field("❌ 錯誤信息 / Error", error_display)
     
     # 基本Bot資訊
-    embed.add_field(name="\u200b", value="\n", inline=False)
-    embed.add_field(
-        name="🤖 Bot資訊 / Bot Info",
-        value=f"名稱 / Name: {bot.user.name}\n"
-              f"延遲 / Latency: {round(bot.latency * 1000)}ms\n"
-              f"監控狀態 / Monitor: {'✅ 運行中' if task_manager.rate_check_task and not task_manager.rate_check_task.cancelled() else '❌ 已停止'}",
-        inline=False
+    embed_builder.add_separator()
+    monitor_status = '✅ 運行中' if task_manager.rate_check_task and not task_manager.rate_check_task.cancelled() else '❌ 已停止'
+    embed_builder.add_field(
+        "🤖 Bot資訊 / Bot Info",
+        f"名稱 / Name: {bot.user.name}\n"
+        f"延遲 / Latency: {round(bot.latency * 1000)}ms\n"
+        f"監控狀態 / Monitor: {monitor_status}"
     )
-    
+
     # 多伺服器統計
     total_servers = 0
     servers_with_channels = 0
-    
+
     for key, data in data_manager.data.items():
         if key == 'rate_history':
             continue
@@ -857,29 +746,27 @@ async def system_slash(interaction: discord.Interaction, mode: str = "quick"):
             total_servers += 1
             if data.get('channel_id'):
                 servers_with_channels += 1
-    
-    embed.add_field(
-        name="🌐 服務狀態 / Service Status",
-        value=f"總伺服器 / Servers: {total_servers}\n"
-              f"已設定通知 / Notifications: {servers_with_channels}\n"
-              f"系統管理器 / System Manager: ✅ 已啟用",
-        inline=False
+
+    embed_builder.add_field(
+        "🌐 服務狀態 / Service Status",
+        f"總伺服器 / Servers: {total_servers}\n"
+        f"已設定通知 / Notifications: {servers_with_channels}\n"
+        f"系統管理器 / System Manager: ✅ 已啟用"
     )
-    
+
     # 操作提示
     if mode == "detailed":
-        embed.add_field(name="\u200b", value="\n", inline=False)
-        embed.add_field(
-            name="🔧 快速操作 / Quick Actions",
-            value="• `/system` - 快速狀態檢查\n"
-                  "• `/maintenance daily` - 執行維護\n"
-                  "• `/health` - 健康檢查詳情",
-            inline=False
+        embed_builder.add_separator()
+        embed_builder.add_field(
+            "🔧 快速操作 / Quick Actions",
+            "• `/system` - 快速狀態檢查\n"
+            "• `/maintenance daily` - 執行維護\n"
+            "• `/health` - 健康檢查詳情"
         )
-    
-    embed.set_footer(text="整合系統管理 v1.0 / Integrated System Management v1.0")
-    
-    await interaction.followup.send(embed=embed)
+
+    embed_builder.with_footer("整合系統管理 v1.0 / Integrated System Management v1.0")
+
+    await interaction.followup.send(embed=embed_builder.build())
 
 # ====== 系統管理輔助指令 ======
 
@@ -889,16 +776,13 @@ async def system_slash(interaction: discord.Interaction, mode: str = "quick"):
     app_commands.Choice(name="快速檢查 / Quick Check", value="quick"),
     app_commands.Choice(name="詳細檢查 / Detailed Check", value="detailed")
 ])
-async def health_slash(interaction: discord.Interaction, 
+@require_admin_permission()
+async def health_slash(interaction: discord.Interaction,
                       check_type: str = "quick"):
     """
     系統健康檢查
     check_type: "quick" 為快速檢查，"detailed" 為詳細檢查
     """
-    # 檢查用戶是否為管理員
-    if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("❌ 此指令需要管理員權限 / This command requires administrator permission")
-        return
     
     # 參數驗證
     if check_type not in ["quick", "detailed"]:
@@ -947,31 +831,28 @@ async def health_slash(interaction: discord.Interaction,
                 logger.error("❌ 詳細檢查保存驗證失敗")
     
     # 統一的結果顯示
-    color = 0x00ff00 if health_report.get('overall_status', health_report.get('status')) == 'healthy' else 0xff9900
-    if health_report.get('overall_status', health_report.get('status')) == 'error':
-        color = 0xff0000
-    
-    embed = discord.Embed(
-        title=title,
-        color=color,
-        timestamp=datetime.now()
-    )
-    
-    # 狀態欄位
     status_key = 'overall_status' if check_type == 'detailed' else 'status'
     status = health_report.get(status_key, 'unknown')
+
+    embed_builder = EmbedBuilder(title)
+    if status == 'healthy':
+        embed_builder.success()
+    elif status == 'error':
+        embed_builder.error()
+    else:
+        embed_builder.warning()
+
+    # 狀態欄位
     status_icons = {"healthy": "✅", "warning": "⚠️", "error": "❌", "unknown": "❓"}
-    
-    embed.add_field(
-        name="🎯 整體狀態 / Overall Status",
-        value=f"{status_icons.get(status, '❓')} **{status.upper()}**",
-        inline=False
+
+    embed_builder.add_field(
+        "🎯 整體狀態 / Overall Status",
+        f"{status_icons.get(status, '❓')} **{status.upper()}**"
     )
-    
-    embed.add_field(
-        name="🔍 檢查項目 / Checks Performed",
-        value=f"檢查數量 / Total Checks: {len(health_report.get('checks', {}))}",
-        inline=False
+
+    embed_builder.add_field(
+        "🔍 檢查項目 / Checks Performed",
+        f"檢查數量 / Total Checks: {len(health_report.get('checks', {}))}"
     )
     
     # 檢查結果摘要
@@ -984,56 +865,45 @@ async def health_slash(interaction: discord.Interaction,
                 check_summary.append(f"{status_icon} {check_name}")
             else:
                 check_summary.append(f"❓ {check_name}")
-        
-        embed.add_field(
-            name="📋 檢查結果 / Check Results",
-            value='\n'.join(check_summary[:10]) if check_summary else "無檢查項目 / No checks",
-            inline=False
+
+        embed_builder.add_field(
+            "📋 檢查結果 / Check Results",
+            '\n'.join(check_summary[:10]) if check_summary else "無檢查項目 / No checks"
         )
-        
+
         if len(check_summary) > 10:
-            embed.set_footer(text=f"顯示前10項，共{len(check_summary)}項檢查 / Showing 10 of {len(check_summary)} checks")
-    
+            embed_builder.with_footer(f"顯示前10項，共{len(check_summary)}項檢查 / Showing 10 of {len(check_summary)} checks")
+
     # 顯示警告和錯誤（僅詳細檢查）
     if check_type == "detailed":
         warnings = health_report.get('warnings', [])
         errors = health_report.get('errors', [])
-        
+
         if warnings:
-            embed.add_field(
-                name="⚠️ 警告 / Warnings",
-                value='\n'.join(warnings[:5]) + ('\n...' if len(warnings) > 5 else ''),
-                inline=False
-            )
-        
+            warning_text = '\n'.join(warnings[:5]) + ('\n...' if len(warnings) > 5 else '')
+            embed_builder.add_field("⚠️ 警告 / Warnings", warning_text)
+
         if errors:
-            embed.add_field(
-                name="❌ 錯誤 / Errors",
-                value='\n'.join(errors[:5]) + ('\n...' if len(errors) > 5 else ''),
-                inline=False
-            )
-    
+            error_text = '\n'.join(errors[:5]) + ('\n...' if len(errors) > 5 else '')
+            embed_builder.add_field("❌ 錯誤 / Errors", error_text)
+
     # 顯示檢查完成時間
     timestamp = health_report.get('timestamp', datetime.now().isoformat())
-    embed.add_field(
-        name="🕒 檢查時間 / Check Time",
-        value=f"`{timestamp}`",
-        inline=False
-    )
-    
+    embed_builder.add_field("🕒 檢查時間 / Check Time", f"`{timestamp}`")
+
     # 添加使用提示
     if check_type == "quick":
-        embed.set_footer(text="提示：使用 /health detailed 獲取詳細分析 / Tip: Use /health detailed for comprehensive analysis")
+        embed_builder.with_footer("提示：使用 /health detailed 獲取詳細分析 / Tip: Use /health detailed for comprehensive analysis")
     else:
         # 顯示保存狀態
         health_history = data_manager.data.get('health_check_history', {})
         last_detailed = health_history.get('last_detailed_check')
         if last_detailed and last_detailed.get('timestamp'):
-            embed.set_footer(text=f"✅ 詳細檢查已保存到系統記錄 / Detailed check saved to system records")
+            embed_builder.with_footer("✅ 詳細檢查已保存到系統記錄 / Detailed check saved to system records")
         else:
-            embed.set_footer(text="⚠️ 檢查結果保存可能有問題 / Check result saving may have issues")
-    
-    await interaction.followup.send(embed=embed)
+            embed_builder.with_footer("⚠️ 檢查結果保存可能有問題 / Check result saving may have issues")
+
+    await interaction.followup.send(embed=embed_builder.build())
 
 
 @bot.tree.command(name="maintenance", description="系統維護管理 / System maintenance management")
@@ -1043,12 +913,9 @@ async def health_slash(interaction: discord.Interaction,
     app_commands.Choice(name="每日維護 / Daily Maintenance", value="daily"),
     app_commands.Choice(name="緊急清理 / Emergency Cleanup", value="emergency")
 ])
+@require_admin_permission()
 async def maintenance_slash(interaction: discord.Interaction, operation: str = "summary"):
     """系統維護管理"""
-    # 檢查用戶是否為管理員
-    if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("❌ 此指令需要管理員權限 / This command requires administrator permission")
-        return
     
     valid_operations = ["summary", "daily", "emergency"]
     if operation not in valid_operations:
@@ -1095,11 +962,9 @@ async def maintenance_slash(interaction: discord.Interaction, operation: str = "
             )
             
         except Exception as e:
-            embed = discord.Embed(
-                title="❌ 維護狀態獲取失敗",
-                description=f"錯誤: {str(e)}",
-                color=0xff0000
-            )
+            embed = (EmbedBuilder("❌ 維護狀態獲取失敗", f"錯誤: {str(e)}")
+                .error()
+                .build())
         
         await interaction.followup.send(embed=embed)
     
@@ -1491,13 +1356,19 @@ async def schedule_daily_maintenance():
                         logger.error("❌ 詳細健康檢查結果驗證失敗")
                     else:
                         # 檢查時間戳是否是最近的（1小時內）
-                        check_time = datetime.fromisoformat(last_detailed['timestamp'].replace('Z', '+00:00'))
-                        time_diff = (datetime.now() - check_time.replace(tzinfo=None)).total_seconds()
-                        if time_diff > 3600:  # 超過1小時
-                            maintenance_validation_passed = False
-                            validation_issues.append(f"詳細健康檢查時間過舊 ({time_diff/60:.1f}分鐘前)")
+                        timestamp_str = last_detailed['timestamp'].replace('Z', '+00:00')
+                        check_time = parse_timestamp_safe(timestamp_str)
+                        if check_time:
+                            time_diff = (datetime.now() - check_time.replace(tzinfo=None)).total_seconds()
+                            if time_diff > 3600:  # 超過1小時
+                                maintenance_validation_passed = False
+                                validation_issues.append(f"詳細健康檢查時間過舊 ({time_diff/60:.1f}分鐘前)")
+                            else:
+                                logger.info(f"✅ 詳細健康檢查記錄驗證通過: {last_detailed['timestamp']}")
                         else:
-                            logger.info(f"✅ 詳細健康檢查記錄驗證通過: {last_detailed['timestamp']}")
+                            maintenance_validation_passed = False
+                            validation_issues.append("詳細健康檢查時間戳解析失敗")
+                            logger.error("❌ 詳細健康檢查時間戳解析失敗")
                     
                     # 驗證維護任務是否都成功完成
                     if failed_tasks > 0:
