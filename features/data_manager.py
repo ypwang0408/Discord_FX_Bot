@@ -257,27 +257,9 @@ class ServerDataManager:
                 record for record in rate_history
                 if datetime.fromisoformat(record['timestamp']) > cutoff_date
             ]
-        
+
         return rate_history
-    
-    def get_all_servers_with_channels(self):
-        """獲取所有設定了通知頻道的伺服器"""
-        servers_with_channels = []
-        for guild_id_str, server_data in self.data.items():
-            # 跳過匯率歷史記錄
-            if guild_id_str == 'rate_history':
-                continue
-                
-            if isinstance(server_data, dict) and server_data.get('channel_id'):
-                servers_with_channels.append({
-                    'guild_id': int(guild_id_str),
-                    'channel_id': server_data['channel_id'],
-                    'threshold': server_data['threshold'],
-                    'use_everyone_mention': server_data['use_everyone_mention'],
-                    'server_data': server_data
-                })
-        return servers_with_channels
-    
+
     def add_health_check_record(self, health_report, check_type='quick'):
         """添加健康檢查記錄 - 簡化結構版本"""
         try:
