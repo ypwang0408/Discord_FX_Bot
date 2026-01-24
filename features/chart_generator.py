@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 import io
 import numpy as np
 import logging
+from utils import parse_timestamp_safe, format_timestamp_display
 
 logger = logging.getLogger(__name__)
 
@@ -49,9 +50,21 @@ class RateChartGenerator:
             return None
         
         try:
-            # 準備數據
-            dates = [datetime.fromisoformat(record['timestamp']) for record in filtered_data]
-            rates = [record['rate'] for record in filtered_data]
+            # 準備數據 - 使用 parse_timestamp_safe 進行安全解析
+            dates = []
+            rates = []
+            for record in filtered_data:
+                parsed_time = parse_timestamp_safe(record['timestamp'])
+                if parsed_time:
+                    dates.append(parsed_time)
+                    rates.append(record['rate'])
+                else:
+                    logger.warning(f"無法解析時間戳記: {record['timestamp']}")
+
+            if len(dates) < 2:
+                logger.warning(f"伺服器 {guild_id} 有效數據點不足")
+                return None
+
             threshold = server_data['threshold']
             
             # 創建圖表
@@ -134,16 +147,28 @@ class RateChartGenerator:
             
             for i, days in enumerate(comparison_days):
                 cutoff_date = datetime.now() - timedelta(days=days)
-                filtered_data = [
-                    record for record in all_rate_history
-                    if datetime.fromisoformat(record['timestamp']) > cutoff_date
-                ]
-                
+                # 使用 parse_timestamp_safe 進行安全過濾
+                filtered_data = []
+                for record in all_rate_history:
+                    parsed_time = parse_timestamp_safe(record['timestamp'])
+                    if parsed_time and parsed_time > cutoff_date:
+                        filtered_data.append(record)
+
                 if len(filtered_data) < 2:
                     continue
-                
-                dates = [datetime.fromisoformat(record['timestamp']) for record in filtered_data]
-                rates = [record['rate'] for record in filtered_data]
+
+                # 使用 parse_timestamp_safe 進行安全解析
+                dates = []
+                rates = []
+                for record in filtered_data:
+                    parsed_time = parse_timestamp_safe(record['timestamp'])
+                    if parsed_time:
+                        dates.append(parsed_time)
+                        rates.append(record['rate'])
+
+                if len(dates) < 2:
+                    continue
+
                 threshold = server_data['threshold']
                 
                 ax = axes[i]
@@ -202,12 +227,25 @@ class RateChartGenerator:
         try:
             # 數據已經在 data_manager.get_rate_history 中過濾了
             filtered_data = rate_history
-            
+
             if len(filtered_data) < 2:
                 return None
-            
-            dates = [datetime.fromisoformat(record['timestamp']) for record in filtered_data]
-            rates = [record['rate'] for record in filtered_data]
+
+            # 使用 parse_timestamp_safe 進行安全解析
+            dates = []
+            rates = []
+            for record in filtered_data:
+                parsed_time = parse_timestamp_safe(record['timestamp'])
+                if parsed_time:
+                    dates.append(parsed_time)
+                    rates.append(record['rate'])
+                else:
+                    logger.warning(f"無法解析時間戳記: {record['timestamp']}")
+
+            if len(dates) < 2:
+                logger.warning(f"伺服器 {guild_id} 有效數據點不足")
+                return None
+
             threshold = server_data['threshold']
             
             # 計算統計數據
