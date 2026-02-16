@@ -16,13 +16,13 @@ logger = logging.getLogger(__name__)
 
 class SystemManager:
     """系統管理器 - 整合健康監控和自動化運維"""
-    
-    def __init__(self, data_manager):
+
+    def __init__(self, data_manager, base_dir=None):
         self.data_manager = data_manager
-        
-        # 初始化子模組
-        self.health_monitor = SystemHealthMonitor(data_manager)
-        self.auto_maintenance = AutoMaintenance(data_manager, self.health_monitor)
+
+        # 初始化子模組，傳遞 base_dir
+        self.health_monitor = SystemHealthMonitor(data_manager, base_dir=base_dir)
+        self.auto_maintenance = AutoMaintenance(data_manager, self.health_monitor, base_dir=base_dir)
         
         # 系統狀態快取
         self._last_health_check = None

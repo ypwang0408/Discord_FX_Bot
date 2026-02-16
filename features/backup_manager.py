@@ -16,10 +16,14 @@ logger = logging.getLogger(__name__)
 
 class DataBackupManager:
     """數據備份管理器"""
-    
-    def __init__(self, data_manager):
+
+    def __init__(self, data_manager, base_dir=None):
         self.data_manager = data_manager
-        self.backup_dir = "backups"
+        # 如果提供了 base_dir，使用絕對路徑；否則使用相對路徑（向後兼容）
+        if base_dir:
+            self.backup_dir = os.path.join(base_dir, "backups")
+        else:
+            self.backup_dir = "backups"
         self.ensure_backup_dir()
     
     def ensure_backup_dir(self):

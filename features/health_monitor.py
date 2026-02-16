@@ -20,13 +20,15 @@ logger = logging.getLogger(__name__)
 
 class SystemHealthMonitor:
     """系統健康監控器"""
-    
-    def __init__(self, data_manager):
+
+    def __init__(self, data_manager, base_dir=None):
         self.data_manager = data_manager
         self.health_history = []
         self.max_history_size = 1000  # 保留最近1000次檢查記錄
         self.last_check_time = None
         self.consecutive_failures = 0
+        # 儲存 base_dir 用於構建絕對路徑
+        self.base_dir = base_dir if base_dir else os.getcwd()
         
         # 健康檢查配置
         self.thresholds = {
@@ -273,7 +275,7 @@ class SystemHealthMonitor:
                 integrity_report['status'] = 'error'
             
             # 檢查備份文件
-            backup_dir = "backups"
+            backup_dir = os.path.join(self.base_dir, "backups")
             if os.path.exists(backup_dir):
                 backup_files = [f for f in os.listdir(backup_dir) if f.endswith('.json') and f != 'backup_record.json']
                 integrity_report['backup_files'] = {
@@ -323,13 +325,13 @@ class SystemHealthMonitor:
             
             # 檢查重要文件和目錄的權限
             important_paths = [
-                'main.py',
-                'features/',
-                'server_data.json',
-                'backups/',
-                'bot.log'
+                os.path.join(self.base_dir, 'main.py'),
+                os.path.join(self.base_dir, 'features/'),
+                os.path.join(self.base_dir, 'server_data.json'),
+                os.path.join(self.base_dir, 'backups/'),
+                os.path.join(self.base_dir, 'logs', 'bot.log')
             ]
-            
+
             for path in important_paths:
                 if os.path.exists(path):
                     file_system_report['permissions'][path] = {
@@ -344,7 +346,7 @@ class SystemHealthMonitor:
                         file_system_report['status'] = 'warning'
             
             # 檢查日誌文件大小
-            log_file = 'bot.log'
+            log_file = os.path.join(self.base_dir, 'logs', 'bot.log')
             if os.path.exists(log_file):
                 log_size = os.path.getsize(log_file)
                 file_system_report['important_files']['bot_log'] = {

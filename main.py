@@ -12,6 +12,9 @@ import os
 import logging
 from dotenv import load_dotenv
 
+# 獲取腳本所在目錄的絕對路徑
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 # 導入自定義模組
 from features import (
     ServerDataManager,
@@ -52,14 +55,14 @@ from tasks import (
 )
 
 # 載入環境變數
-load_dotenv()
+load_dotenv(os.path.join(BASE_DIR, '.env'))
 
 # 設定日誌 - 使用日誌輪轉
 from logging.handlers import TimedRotatingFileHandler
 import sys
 
 # 創建logs目錄（如果不存在）
-os.makedirs('logs', exist_ok=True)
+os.makedirs(os.path.join(BASE_DIR, 'logs'), exist_ok=True)
 
 # 配置日誌格式
 log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -68,7 +71,7 @@ log_level = logging.INFO
 # 創建日誌處理器
 # 1. 按日輪轉的文件處理器（每天午夜輪轉，保留30天）
 file_handler = TimedRotatingFileHandler(
-    filename='logs/bot.log',
+    filename=os.path.join(BASE_DIR, 'logs', 'bot.log'),
     when='midnight',
     interval=1,
     backupCount=30,
@@ -95,15 +98,15 @@ intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="/", intents=intents)
 
 # 初始化功能模組
-data_manager = ServerDataManager()
+data_manager = ServerDataManager(base_dir=BASE_DIR)
 rate_monitor = ExchangeRateMonitor(data_manager)
-backup_manager = DataBackupManager(data_manager)
+backup_manager = DataBackupManager(data_manager, base_dir=BASE_DIR)
 chart_generator = RateChartGenerator(data_manager)
 notification_system = NotificationSystem(data_manager, bot)
 
 # 初始化整合的系統管理器
 try:
-    system_manager = SystemManager(data_manager)
+    system_manager = SystemManager(data_manager, base_dir=BASE_DIR)
     logger.info("✅ 系統管理器初始化成功")
 except Exception as e:
     logger.error(f"❌ 系統管理器初始化失敗: {e}")

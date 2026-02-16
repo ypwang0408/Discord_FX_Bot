@@ -19,9 +19,13 @@ def get_minute_precision_timestamp():
 
 class ServerDataManager:
     """伺服器數據管理器"""
-    
-    def __init__(self, data_file="server_data.json"):
-        self.data_file = data_file
+
+    def __init__(self, data_file="server_data.json", base_dir=None):
+        # 如果提供了 base_dir，使用絕對路徑；否則使用相對路徑（向後兼容）
+        if base_dir:
+            self.data_file = os.path.join(base_dir, data_file)
+        else:
+            self.data_file = data_file
         self.data = self.load_data()
         # 初始化匯率歷史
         if 'rate_history' not in self.data:

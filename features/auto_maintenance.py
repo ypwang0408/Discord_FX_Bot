@@ -22,12 +22,14 @@ logger = logging.getLogger(__name__)
 
 class AutoMaintenance:
     """自動化運維管理器"""
-    
-    def __init__(self, data_manager, health_monitor=None):
+
+    def __init__(self, data_manager, health_monitor=None, base_dir=None):
         self.data_manager = data_manager
         self.health_monitor = health_monitor
         self.maintenance_log = []
         self.max_log_size = 500  # 保留最近500條運維記錄
+        # 儲存 base_dir 用於構建絕對路徑
+        self.base_dir = base_dir if base_dir else os.getcwd()
         
         # 運維配置
         self.config = {
@@ -111,13 +113,15 @@ class AutoMaintenance:
     async def _cleanup_old_logs(self, report: Dict):
         """清理舊日誌文件"""
         try:
-            log_files = glob.glob("*.log") + glob.glob("logs/*.log")
+            # 使用絕對路徑進行 glob 搜索
+            log_files = (glob.glob(os.path.join(self.base_dir, "*.log")) +
+                        glob.glob(os.path.join(self.base_dir, "logs", "*.log")))
             cleaned_files = []
             compressed_files = []
-            
+
             cutoff_date = datetime.now() - timedelta(days=self.config['log_cleanup']['retention_days'])
             max_size_bytes = self.config['log_cleanup']['max_file_size_mb'] * 1024 * 1024
-            
+
             for log_file in log_files:
                 if not os.path.exists(log_file):
                     continue
@@ -139,7 +143,7 @@ class AutoMaintenance:
                         cleaned_files.append(log_file)
                 
                 # 如果文件過大，進行輪轉
-                elif file_size > max_size_bytes and log_file == 'bot.log':
+                elif file_size > max_size_bytes and os.path.basename(log_file) == 'bot.log':
                     await self._rotate_log_file(log_file)
                     cleaned_files.append(f"{log_file} (rotated)")
             
@@ -157,7 +161,7 @@ class AutoMaintenance:
     async def _cleanup_old_backups(self, report: Dict):
         """智慧清理舊備份"""
         try:
-            backup_dir = "backups"
+            backup_dir = os.path.join(self.base_dir, "backups")
             if not os.path.exists(backup_dir):
                 return
             
@@ -643,12 +647,14 @@ echo "重啟完成"
         try:
             logger.warning("🚨 執行緊急清理...")
             
-            disk_before = psutil.disk_usage(os.getcwd())
-            
+            disk_before = psutil.disk_usage(self.base_dir)
+
             # 1. 立即清理所有舊日誌
-            log_files = glob.glob("*.log*") + glob.glob("logs/*.log*")
+            log_files = (glob.glob(os.path.join(self.base_dir, "*.log*")) +
+                        glob.glob(os.path.join(self.base_dir, "logs", "*.log*")))
+            bot_log_path = os.path.join(self.base_dir, 'bot.log')
             for log_file in log_files:
-                if log_file != 'bot.log':  # 保留當前日誌
+                if log_file != bot_log_path:  # 保留當前日誌
                     try:
                         os.remove(log_file)
                         cleanup_report['actions_taken'].append(f"刪除日誌: {log_file}")
@@ -657,7 +663,7 @@ echo "重啟完成"
                         cleanup_report['actions_taken'].append(f"刪除日誌失敗: {log_file} - {e}")
             
             # 2. 清理超過3天的備份
-            backup_dir = "backups"
+            backup_dir = os.path.join(self.base_dir, "backups")
             if os.path.exists(backup_dir):
                 cutoff_date = datetime.now() - timedelta(days=3)
                 for backup_file in os.listdir(backup_dir):
